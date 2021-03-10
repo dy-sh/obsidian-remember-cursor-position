@@ -1,61 +1,132 @@
-import { App, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { App, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import * as CodeMirror from "codemirror";
 
-interface MyPluginSettings {
-	mySetting: string;
+interface PluginSettings {
+	dbFileName: string;
 }
 
-const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
+const DEFAULT_SETTINGS: PluginSettings = {
+	dbFileName: '.obsidian\\plugins\\obsidian-remember-cursor-position\\cursor-positions.json'
 }
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+interface CursorPosition {
+	line: number;
+	ch: number;
+}
+
+export default class CodeBlockFromSelection extends Plugin {
+	settings: PluginSettings;
+	currentPos: CursorPosition;
 
 	async onload() {
-		console.log('loading plugin');
-
 		await this.loadSettings();
 
-		this.addRibbonIcon('dice', 'Sample Plugin', () => {
-			new Notice('This is a notice!');
-		});
+		// this.addCommand({
+		// 	id: 'test-action1',
+		// 	name: 'Test',
+		// 	callback: () => this.saveScrollPosition(),
+		// 	hotkeys: [{ modifiers: ["Alt"], key: "1", },],
+		// });
 
-		this.addStatusBarItem().setText('Status Bar Text');
-
-		this.addCommand({
-			id: 'open-sample-modal',
-			name: 'Open Sample Modal',
-			// callback: () => {
-			// 	console.log('Simple Callback');
-			// },
-			checkCallback: (checking: boolean) => {
-				let leaf = this.app.workspace.activeLeaf;
-				if (leaf) {
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-					return true;
-				}
-				return false;
-			}
-		});
+		// this.addCommand({
+		// 	id: 'test-action2',
+		// 	name: 'Test',
+		// 	callback: () => this.restoreScrollPosition(),
+		// 	hotkeys: [{ modifiers: ["Alt"], key: "2", },],
+		// });
 
 		this.addSettingTab(new SampleSettingTab(this.app, this));
 
-		this.registerCodeMirror((cm: CodeMirror.Editor) => {
-			console.log('codemirror', cm);
-		});
+		this.registerEvent(
+			this.app.workspace.on('file-open', (file) => this.restoreScrollPosition()),
+		);
 
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
-		});
-
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
+		this.registerInterval(window.setInterval(() => this.checkPagePosition(), 500));
 	}
 
-	onunload() {
-		console.log('unloading plugin');
+	checkPagePosition() {
+		let pos = this.getCursorPosition();
+
+		if (!this.currentPos)
+			this.currentPos = pos;
+
+		if (this.currentPos.ch != pos.ch || this.currentPos.line != pos.line) {
+			this.currentPos = pos;
+			this.saveScrollPosition()
+		}
 	}
+
+	async saveScrollPosition() {
+		let editor = this.getEditor();
+
+		console.log(editor.getScrollInfo())
+
+		let pos = this.getCursorPosition();
+		let fileName = this.app.workspace.getActiveFile().path.trim(); //this.app.workspace.activeLeaf.view.file.path.trim()
+
+		let db = await this.readDb();
+		db[fileName] = pos;
+		this.writeDb(db);
+	}
+
+	async restoreScrollPosition() {
+		let db = await this.readDb();
+
+		let fileName = this.app.workspace.getActiveFile().path.trim();
+		let pos = db[fileName];
+		console.log(pos)
+
+		if (pos) {
+			this.scrollTo(pos.line)
+			this.setCursorPosition(pos);
+		}
+	}
+
+	async readDb(): Promise<{ [file_path: string]: CursorPosition; }> {
+		let positions_dict: { [file_path: string]: CursorPosition; } = {}
+
+		if (await this.app.vault.adapter.exists(this.settings.dbFileName)) {
+			let data = await this.app.vault.adapter.read(this.settings.dbFileName);
+			positions_dict = JSON.parse(data);
+		}
+
+		return positions_dict;
+	}
+
+	async writeDb(db: { [file_path: string]: CursorPosition; }) {
+		await this.app.vault.adapter.write(this.settings.dbFileName, JSON.stringify(db));
+	}
+
+
+	getCursorPosition(): CursorPosition {
+		let editor = this.getEditor();
+		let cursor = editor.getCursor();
+
+		return {
+			line: cursor.line,
+			ch: cursor.ch
+		};
+	}
+
+	setCursorPosition(pos: CursorPosition) {
+		let editor = this.getEditor();
+		editor.setCursor(pos.line, pos.ch);
+	}
+
+	scrollTo(line: number) {
+		let editor = this.getEditor();
+
+		var t = editor.charCoords({ line: line, ch: 0 }, "local").top;
+		var middleHeight = editor.getScrollerElement().offsetHeight / 2;
+		editor.scrollTo(null, t - middleHeight - 5);
+	}
+
+	private getEditor(): CodeMirror.Editor {
+		let activeLeaf: any = this.app.workspace.activeLeaf;
+		return activeLeaf.view.sourceMode.cmEditor;
+	}
+
+
 
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -66,46 +137,31 @@ export default class MyPlugin extends Plugin {
 	}
 }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
 
-	onOpen() {
-		let {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		let {contentEl} = this;
-		contentEl.empty();
-	}
-}
 
 class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
+	plugin: CodeBlockFromSelection;
 
-	constructor(app: App, plugin: MyPlugin) {
+	constructor(app: App, plugin: CodeBlockFromSelection) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
 
 	display(): void {
-		let {containerEl} = this;
+		let { containerEl } = this;
 
 		containerEl.empty();
 
-		containerEl.createEl('h2', {text: 'Settings for my awesome plugin.'});
+		containerEl.createEl('h2', { text: 'Remember cursor position - Settings' });
 
 		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
+			.setName('Data file name')
+			.setDesc('Save positions to this file')
 			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue('')
+				.setPlaceholder('Example: cursor-positions.json')
+				.setValue(this.plugin.settings.dbFileName)
 				.onChange(async (value) => {
-					console.log('Secret: ' + value);
-					this.plugin.settings.mySetting = value;
+					this.plugin.settings.dbFileName = value;
 					await this.plugin.saveSettings();
 				}));
 	}

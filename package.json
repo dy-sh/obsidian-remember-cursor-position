@@ -1,7 +1,7 @@
 {
-  "name": "obsidian-sample-plugin",
-  "version": "0.9.7",
-  "description": "This is a sample plugin for Obsidian (https://obsidian.md)",
+  "name": "obsidian-code-block-from-selection",
+  "version": "1.0.1",
+  "description": "Adds code block for the selected text",
   "main": "main.js",
   "scripts": {
     "dev": "rollup --config rollup.config.js -w",

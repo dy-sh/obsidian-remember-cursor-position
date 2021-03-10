@@ -9,3 +9,5 @@ package-lock.json
 # build
 main.js
 *.js.map
+data.json
+cursor-positions.json
