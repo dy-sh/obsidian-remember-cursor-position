@@ -1,7 +1,7 @@
 {
-  "name": "obsidian-code-block-from-selection",
+  "name": "obsidian-remember-cursor-position",
   "version": "1.0.1",
-  "description": "Adds code block for the selected text",
+  "description": "Remember cursor position for each note",
   "main": "main.js",
   "scripts": {
     "dev": "rollup --config rollup.config.js -w",
