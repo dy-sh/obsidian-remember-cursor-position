@@ -209,8 +209,9 @@ export default class RememberCursorPosition extends Plugin {
 	setEphemeralState(state: EphemeralState) {
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (view && state.scroll) {
-			// view.setEphemeralState(state) //Does not work properly
-			view.currentMode.applyScroll(state.scroll);
+			view.setEphemeralState(state);
+			view.previewMode.applyScroll(state.scroll);
+			view.sourceMode.applyScroll(state.scroll);
 		}
 
 		if (state.cursor) {
