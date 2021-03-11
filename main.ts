@@ -61,11 +61,6 @@ export default class RememberCursorPosition extends Plugin {
 			this.app.vault.on('delete', (file) => this.deleteFile(file)),
 		);
 
-
-		this.registerEvent(
-			this.app.vault.on('create', (file) => console.log("create")),
-		);
-
 		this.registerInterval(window.setInterval(() => this.checkEphemeralStateChanged(), 100));
 
 		this.restoreEphemeralState();
@@ -99,8 +94,8 @@ export default class RememberCursorPosition extends Plugin {
 			this.lastEphemeralState = st;
 
 		if (!this.isEphemeralStatesEquals(st, this.lastEphemeralState)) {
-			this.lastEphemeralState = st;
 			this.saveEphemeralState(st)
+			this.lastEphemeralState = st;
 		}
 	}
 
@@ -132,6 +127,8 @@ export default class RememberCursorPosition extends Plugin {
 		let fileName = this.app.workspace.getActiveFile()?.path?.trim();
 		if (fileName && fileName == this.lastLoadedFileName) { //do not save if file changed and was not loaded
 			console.log("save " + fileName);
+			console.log(this.lastEphemeralState)			
+			console.log(st)
 			this.db[fileName] = st;
 			// this.writeDb(this.db)
 		}
@@ -141,15 +138,18 @@ export default class RememberCursorPosition extends Plugin {
 		return new Promise(resolve => setTimeout(resolve, ms));
 	}
 
-	async restoreEphemeralState() {	
+	async restoreEphemeralState() {
+
 		await this.delay(100)
 
 		let fileName = this.app.workspace.getActiveFile()?.path?.trim();
-		if (fileName) {
-			if (this.lastLoadedFileName != fileName) { //not resotered yet
-				this.lastEphemeralState = {}
+		if (this.lastLoadedFileName != fileName) {
+			console.log("open " + fileName)
+			this.lastEphemeralState = {}
+			this.lastLoadedFileName = fileName;
+
+			if (fileName) {
 				console.log("restore " + fileName);
-				this.lastLoadedFileName = fileName;
 				let st = this.db[fileName];
 				if (st) {
 					this.setEphemeralState(st);
@@ -157,6 +157,7 @@ export default class RememberCursorPosition extends Plugin {
 				}
 			}
 		}
+
 	}
 
 	async readDb(): Promise<{ [file_path: string]: EphemeralState; }> {
@@ -183,7 +184,7 @@ export default class RememberCursorPosition extends Plugin {
 		// let state: EphemeralState = this.app.workspace.getActiveViewOfType(MarkdownView)?.getEphemeralState(); //Does not work properly
 
 		let state: EphemeralState = {};
-		state.scroll = this.app.workspace.getActiveViewOfType(MarkdownView)?.currentMode?.getScroll();
+		state.scroll = Number(this.app.workspace.getActiveViewOfType(MarkdownView)?.currentMode?.getScroll()?.toFixed(4));
 
 		let editor = this.getEditor();
 		if (editor) {
