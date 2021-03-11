@@ -34,7 +34,13 @@ export default class RememberCursorPosition extends Plugin {
 	async onload() {
 		await this.loadSettings();
 
-		this.db = await this.readDb();
+		try {
+			this.db = await this.readDb();
+		}
+		catch (e) {
+			console.error("Remember Cursor Position plugin cant read db: " + e);
+			this.db = {}
+		}
 
 		this.addSettingTab(new SettingTab(this.app, this));
 
@@ -64,26 +70,27 @@ export default class RememberCursorPosition extends Plugin {
 
 
 	renameFile(file: TAbstractFile, oldPath: string) {
-		let newName = file.path.trim();
-		let oldName = oldPath.trim();
+		let newName = file.path;
+		let oldName = oldPath;
 		this.db[newName] = this.db[oldName]
 		delete this.db[oldName];
 	}
 
 
 	deleteFile(file: TAbstractFile) {
-		let fileName = file.path.trim();
+		let fileName = file.path;
 		delete this.db[fileName];
 	}
 
 
 	checkEphemeralStateChanged() {
-		let st = this.getEphemeralState();
-		let fileName = this.app.workspace.getActiveFile()?.path?.trim();
+		let fileName = this.app.workspace.getActiveFile()?.path;
 
 		//waiting for load new file
 		if (!fileName || !this.lastLoadedFileName || fileName != this.lastLoadedFileName || this.loadingFile)
 			return;
+
+		let st = this.getEphemeralState();
 
 		if (!this.lastEphemeralState)
 			this.lastEphemeralState = st;
@@ -128,7 +135,7 @@ export default class RememberCursorPosition extends Plugin {
 
 
 	async saveEphemeralState(st: EphemeralState) {
-		let fileName = this.app.workspace.getActiveFile()?.path?.trim();
+		let fileName = this.app.workspace.getActiveFile()?.path;
 		if (fileName && fileName == this.lastLoadedFileName) { //do not save if file changed and was not loaded
 			this.db[fileName] = st;
 		}
@@ -137,7 +144,7 @@ export default class RememberCursorPosition extends Plugin {
 
 
 	async restoreEphemeralState() {
-		let fileName = this.app.workspace.getActiveFile()?.path?.trim();
+		let fileName = this.app.workspace.getActiveFile()?.path;
 
 		if (fileName && this.loadingFile && this.lastLoadedFileName == fileName) //if already started loading
 			return;
@@ -153,7 +160,7 @@ export default class RememberCursorPosition extends Plugin {
 				if (st) {
 					//waiting for load file and ui update
 					//todo: find better solution to wait for file loaded
-					for (let i = 0; i < 20; i++) { 
+					for (let i = 0; i < 20; i++) {
 						this.setEphemeralState(st);
 						await this.delay(10)
 					}
@@ -216,7 +223,9 @@ export default class RememberCursorPosition extends Plugin {
 
 		if (state.cursor) {
 			let editor = this.getEditor();
-			editor.setSelection(state.cursor.from, state.cursor.to, { scroll: false });
+			if (editor) {
+				editor.setSelection(state.cursor.from, state.cursor.to, { scroll: false });
+			}
 		}
 
 		if (view && state.scroll) {
