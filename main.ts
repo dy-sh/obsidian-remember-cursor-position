@@ -43,9 +43,6 @@ export default class RememberCursorPosition extends Plugin {
 			this.app.workspace.on('file-open', (file) => this.restoreEphemeralState()),
 		);
 
-		// this.registerEvent(
-		// 	this.app.workspace.on('active-leaf-change', () => console.log("active-leaf-change")),
-		// );
 
 		this.registerEvent(
 			this.app.workspace.on('quit', () => { this.writeDb(this.db) }),
@@ -64,18 +61,17 @@ export default class RememberCursorPosition extends Plugin {
 			this.app.vault.on('delete', (file) => this.deleteFile(file)),
 		);
 
-		// this.registerEvent(
-		// 	this.app.vault.on('create', (file) => this.createFileInDb(file, oldPath)),
-		// );
+
+		this.registerEvent(
+			this.app.vault.on('create', (file) => console.log("create")),
+		);
 
 		this.registerInterval(window.setInterval(() => this.checkEphemeralStateChanged(), 100));
 
 		this.restoreEphemeralState();
 	}
 
-	delay(ms: number) {
-		return new Promise(resolve => setTimeout(resolve, ms));
-	}
+
 
 
 	renameFile(file: TAbstractFile, oldPath: string) {
@@ -109,35 +105,56 @@ export default class RememberCursorPosition extends Plugin {
 	}
 
 	isEphemeralStatesEquals(state1: EphemeralState, state2: EphemeralState): boolean {
-		return JSON.stringify(state1) === JSON.stringify(state2)
+		if (state1.cursor && !state2.cursor)
+			return false;
+
+		if (!state1.cursor && state2.cursor)
+			return false;
+
+		if (state1.cursor) {
+			if (state1.cursor.from.ch != state2.cursor.from.ch)
+				return false;
+			if (state1.cursor.from.line != state2.cursor.from.line)
+				return false;
+			if (state1.cursor.to.ch != state2.cursor.to.ch)
+				return false;
+			if (state1.cursor.to.line != state2.cursor.to.line)
+				return false;
+		}
+
+		if (state1.scroll != state2.scroll)
+			return false;
+
+		return true;
 	}
 
 	async saveEphemeralState(st: EphemeralState) {
-		// console.log(st);
-		// console.log(this.app.workspace.getActiveViewOfType(MarkdownView))
 		let fileName = this.app.workspace.getActiveFile()?.path?.trim();
 		if (fileName && fileName == this.lastLoadedFileName) { //do not save if file changed and was not loaded
-			console.log("save");
-			console.log(fileName);
-			console.log(st);
+			console.log("save " + fileName);
 			this.db[fileName] = st;
 			// this.writeDb(this.db)
 		}
 	}
 
-	async restoreEphemeralState() {
-		// this.lastEphemeralState = {}		
+	async delay(ms: number) {
+		return new Promise(resolve => setTimeout(resolve, ms));
+	}
+
+	async restoreEphemeralState() {	
+		await this.delay(100)
 
 		let fileName = this.app.workspace.getActiveFile()?.path?.trim();
 		if (fileName) {
-			console.log("restore");
-			console.log(fileName)
-			this.lastLoadedFileName = fileName;
-			let st = this.db[fileName];
-			if (st) {
-				console.log(st);
-				this.setEphemeralState(st);
-				this.lastEphemeralState = st;
+			if (this.lastLoadedFileName != fileName) { //not resotered yet
+				this.lastEphemeralState = {}
+				console.log("restore " + fileName);
+				this.lastLoadedFileName = fileName;
+				let st = this.db[fileName];
+				if (st) {
+					this.setEphemeralState(st);
+					this.lastEphemeralState = st;
+				}
 			}
 		}
 	}
@@ -163,16 +180,48 @@ export default class RememberCursorPosition extends Plugin {
 
 
 	getEphemeralState(): EphemeralState {
-		return this.app.workspace.getActiveViewOfType(MarkdownView)?.getEphemeralState();
+		// let state: EphemeralState = this.app.workspace.getActiveViewOfType(MarkdownView)?.getEphemeralState(); //Does not work properly
+
+		let state: EphemeralState = {};
+		state.scroll = this.app.workspace.getActiveViewOfType(MarkdownView)?.currentMode?.getScroll();
+
+		let editor = this.getEditor();
+		if (editor) {
+			let from = editor.getCursor("anchor");
+			let to = editor.getCursor("head");
+			if (from && to) {
+				state.cursor = {
+					from: {
+						ch: from.ch,
+						line: from.line
+					},
+					to: {
+						ch: to.ch,
+						line: to.line
+					}
+				}
+			}
+		}
+
+		return state;
 	}
 
 	setEphemeralState(state: EphemeralState) {
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (view) {
-			view.setEphemeralState(state)
+		if (view && state.scroll) {
+			// view.setEphemeralState(state) //Does not work properly
+			view.currentMode.applyScroll(state.scroll);
+		}
+
+		if (state.cursor) {
+			let editor = this.getEditor();
+			editor.setSelection(state.cursor.from, state.cursor.to);
 		}
 	}
 
+	private getEditor(): CodeMirror.Editor {
+		return this.app.workspace.activeLeaf?.view?.sourceMode?.cmEditor;
+	}
 
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
