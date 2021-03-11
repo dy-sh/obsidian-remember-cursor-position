@@ -36,7 +36,7 @@ export default class RememberCursorPosition extends Plugin {
 
 		this.db = await this.readDb();
 
-		this.addSettingTab(new SampleSettingTab(this.app, this));
+		this.addSettingTab(new SettingTab(this.app, this));
 
 		this.registerEvent(
 			this.app.workspace.on('file-open', (file) => this.restoreEphemeralState()),
@@ -245,7 +245,7 @@ export default class RememberCursorPosition extends Plugin {
 
 
 
-class SampleSettingTab extends PluginSettingTab {
+class SettingTab extends PluginSettingTab {
 	plugin: RememberCursorPosition;
 
 	constructor(app: App, plugin: RememberCursorPosition) {
