@@ -31,6 +31,7 @@ export default class RememberCursorPosition extends Plugin {
 	db: { [file_path: string]: EphemeralState; };
 	lastEphemeralState: EphemeralState;
 	lastLoadedFileName: string;
+	loadingFile = false;
 
 	async onload() {
 		await this.loadSettings();
@@ -87,7 +88,7 @@ export default class RememberCursorPosition extends Plugin {
 		let st = this.getEphemeralState();
 		let fileName = this.app.workspace.getActiveFile()?.path?.trim();
 
-		if (fileName != this.lastLoadedFileName) //waiting for load new file
+		if (!fileName || !this.lastLoadedFileName || fileName != this.lastLoadedFileName || this.loadingFile) //waiting for load new file
 			return;
 
 		if (!this.lastEphemeralState)
@@ -127,7 +128,7 @@ export default class RememberCursorPosition extends Plugin {
 		let fileName = this.app.workspace.getActiveFile()?.path?.trim();
 		if (fileName && fileName == this.lastLoadedFileName) { //do not save if file changed and was not loaded
 			console.log("save " + fileName);
-			console.log(this.lastEphemeralState)			
+			console.log(this.lastEphemeralState)
 			console.log(st)
 			this.db[fileName] = st;
 			// this.writeDb(this.db)
@@ -139,10 +140,13 @@ export default class RememberCursorPosition extends Plugin {
 	}
 
 	async restoreEphemeralState() {
-
-		await this.delay(100)
-
 		let fileName = this.app.workspace.getActiveFile()?.path?.trim();
+
+		if (fileName && this.loadingFile && this.lastLoadedFileName == fileName) //already started loading
+			return;
+
+		this.loadingFile = true;
+
 		if (this.lastLoadedFileName != fileName) {
 			console.log("open " + fileName)
 			this.lastEphemeralState = {}
@@ -152,10 +156,15 @@ export default class RememberCursorPosition extends Plugin {
 				console.log("restore " + fileName);
 				let st = this.db[fileName];
 				if (st) {
-					this.setEphemeralState(st);
-					this.lastEphemeralState = st;
+					for (let i = 0; i < 20; i++) { //waiting for load file and ui update
+						this.setEphemeralState(st);	
+						await this.delay(10)						
+					}
 				}
+				this.lastEphemeralState = st;
 			}
+
+			this.loadingFile = false;
 		}
 
 	}
@@ -209,15 +218,16 @@ export default class RememberCursorPosition extends Plugin {
 
 	setEphemeralState(state: EphemeralState) {
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (view && state.scroll) {
-			view.setEphemeralState(state);
-			view.previewMode.applyScroll(state.scroll);
-			view.sourceMode.applyScroll(state.scroll);
-		}
 
 		if (state.cursor) {
 			let editor = this.getEditor();
-			editor.setSelection(state.cursor.from, state.cursor.to);
+			editor.setSelection(state.cursor.from, state.cursor.to,{scroll:false});
+		}
+
+		if (view && state.scroll) {
+			view.setEphemeralState(state);
+			// view.previewMode.applyScroll(state.scroll);
+			// view.sourceMode.applyScroll(state.scroll);
 		}
 	}
 
