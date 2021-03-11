@@ -1,9 +1,9 @@
 {
 	"id": "remember-cursor-position",
 	"name": "Remember cursor position",
-	"version": "1.0.1",
+	"version": "1.0.2",
 	"minAppVersion": "0.9.12",
-	"description": "Remember cursor position for each note",
+	"description": "Remember cursor and scroll position for each note",
 	"author": "Dmitry Savosh",
 	"authorUrl": "https://github.com/derwish-pro/",
 	"isDesktopOnly": false
