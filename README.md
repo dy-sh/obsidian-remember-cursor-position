@@ -6,6 +6,4 @@ The cursor position, scrolling and text selection  for all notes are stored in a
 
 It works in edit and preview mode.
 
-## Caution Mac/Linux users!
 
-Please change the path in the plugin settings by replacing the slash (directory separator) in the opposite direction.
