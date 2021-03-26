@@ -6,7 +6,7 @@ interface PluginSettings {
 }
 
 const DEFAULT_SETTINGS: PluginSettings = {
-	dbFileName: '.obsidian\\plugins\\obsidian-remember-cursor-position\\cursor-positions.json'
+	dbFileName: '.obsidian/plugins/remember-cursor-position/cursor-positions.json'
 }
 
 interface EphemeralState {
@@ -125,7 +125,7 @@ export default class RememberCursorPosition extends Plugin {
 		if (!state1.scroll && state2.scroll)
 			return false;
 
-		if (state1.scroll{
+		if (state1.scroll){
 			if (state1.scroll != state2.scroll)
 				return false;
 		}
@@ -175,7 +175,7 @@ export default class RememberCursorPosition extends Plugin {
 
 	async readDb(): Promise<{ [file_path: string]: EphemeralState; }> {
 		let db: { [file_path: string]: EphemeralState; } = {}
-
+		
 		if (await this.app.vault.adapter.exists(this.settings.dbFileName)) {
 			let data = await this.app.vault.adapter.read(this.settings.dbFileName);
 			db = JSON.parse(data);
