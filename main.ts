@@ -197,6 +197,8 @@ export default class RememberCursorPosition extends Plugin {
 	}
 
 	async writeDb(db: { [file_path: string]: EphemeralState; }) {
+		let newParentFolder = this.settings.dbFileName.substring(0, this.settings.dbFileName.lastIndexOf("/"));
+		await this.app.vault.adapter.mkdir(newParentFolder)
 		await this.app.vault.adapter.write(this.settings.dbFileName, JSON.stringify(db));
 	}
 
