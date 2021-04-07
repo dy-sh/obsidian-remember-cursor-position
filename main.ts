@@ -125,7 +125,7 @@ export default class RememberCursorPosition extends Plugin {
 		if (!state1.scroll && state2.scroll)
 			return false;
 
-		if (state1.scroll){
+		if (state1.scroll) {
 			if (state1.scroll != state2.scroll)
 				return false;
 		}
@@ -140,7 +140,6 @@ export default class RememberCursorPosition extends Plugin {
 			this.db[fileName] = st;
 		}
 	}
-
 
 
 	async restoreEphemeralState() {
@@ -158,11 +157,24 @@ export default class RememberCursorPosition extends Plugin {
 			if (fileName) {
 				let st = this.db[fileName];
 				if (st) {
-					//waiting for load file and ui update
-					//todo: find better solution to wait for file loaded
+					//waiting for load note		
+					await this.delay(1)
+					let scroll: number;
 					for (let i = 0; i < 20; i++) {
-						this.setEphemeralState(st);
+						scroll = this.app.workspace.getActiveViewOfType(MarkdownView)?.currentMode?.getScroll();
+						if (scroll !== null)
+							break;
 						await this.delay(10)
+					}
+
+					//if note opened by link like [link](note.md#header), do not scroll it
+					if (scroll === 0) {
+						//force update scroll while note is loading
+						//todo: find better solution to wait for file loaded
+						for (let i = 0; i < 20; i++) {	
+							this.setEphemeralState(st);
+							await this.delay(10)
+						}
 					}
 				}
 				this.lastEphemeralState = st;
@@ -175,7 +187,7 @@ export default class RememberCursorPosition extends Plugin {
 
 	async readDb(): Promise<{ [file_path: string]: EphemeralState; }> {
 		let db: { [file_path: string]: EphemeralState; } = {}
-		
+
 		if (await this.app.vault.adapter.exists(this.settings.dbFileName)) {
 			let data = await this.app.vault.adapter.read(this.settings.dbFileName);
 			db = JSON.parse(data);
@@ -187,7 +199,6 @@ export default class RememberCursorPosition extends Plugin {
 	async writeDb(db: { [file_path: string]: EphemeralState; }) {
 		await this.app.vault.adapter.write(this.settings.dbFileName, JSON.stringify(db));
 	}
-
 
 
 
