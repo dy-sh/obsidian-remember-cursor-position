@@ -3,10 +3,12 @@ import * as CodeMirror from "codemirror";
 
 interface PluginSettings {
 	dbFileName: string;
+	delayAfterFileOpening: number;
 }
 
 const DEFAULT_SETTINGS: PluginSettings = {
-	dbFileName: '.obsidian/plugins/remember-cursor-position/cursor-positions.json'
+	dbFileName: '.obsidian/plugins/remember-cursor-position/cursor-positions.json',
+	delayAfterFileOpening: 100
 }
 
 interface EphemeralState {
@@ -158,7 +160,7 @@ export default class RememberCursorPosition extends Plugin {
 				let st = this.db[fileName];
 				if (st) {
 					//waiting for load note		
-					await this.delay(1)
+					await this.delay(this.settings.delayAfterFileOpening)
 					let scroll: number;
 					for (let i = 0; i < 20; i++) {
 						scroll = this.app.workspace.getActiveViewOfType(MarkdownView)?.currentMode?.getScroll();
@@ -171,7 +173,7 @@ export default class RememberCursorPosition extends Plugin {
 					if (scroll === 0) {
 						//force update scroll while note is loading
 						//todo: find better solution to wait for file loaded
-						for (let i = 0; i < 20; i++) {	
+						for (let i = 0; i < 20; i++) {
 							this.setEphemeralState(st);
 							await this.delay(10)
 						}
@@ -197,9 +199,12 @@ export default class RememberCursorPosition extends Plugin {
 	}
 
 	async writeDb(db: { [file_path: string]: EphemeralState; }) {
+		//create folder for db file if not exist
 		let newParentFolder = this.settings.dbFileName.substring(0, this.settings.dbFileName.lastIndexOf("/"));
-		await this.app.vault.adapter.mkdir(newParentFolder)
-		await this.app.vault.adapter.write(this.settings.dbFileName, JSON.stringify(db));
+		if (!await this.app.vault.adapter.exists(newParentFolder))
+			this.app.vault.adapter.mkdir(newParentFolder);
+
+		this.app.vault.adapter.write(this.settings.dbFileName, JSON.stringify(db));
 	}
 
 
@@ -292,5 +297,17 @@ class SettingTab extends PluginSettingTab {
 					this.plugin.settings.dbFileName = value;
 					await this.plugin.saveSettings();
 				}));
+
+		new Setting(containerEl)
+			.setName('Delay after opening a new note')
+			.setDesc('Increase delay if note position is not always restored. Slider values: 0-300 ms (default value: 100 ms)')
+			.addSlider(text => text
+				.setLimits(0, 300, 10)
+				.setValue(this.plugin.settings.delayAfterFileOpening)
+				.onChange(async (value) => {
+					this.plugin.settings.delayAfterFileOpening = value;
+					await this.plugin.saveSettings();
+				}));
 	}
 }
+
