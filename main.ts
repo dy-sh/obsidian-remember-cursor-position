@@ -300,7 +300,7 @@ class SettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Delay after opening a new note')
-			.setDesc('Increase delay if note position is not always restored. Slider values: 0-300 ms (default value: 100 ms)')
+			.setDesc('Increase the delay if after opening a note using a link to the note header, not the header but the last position is opened. Can be set to zero (left) if you are not using links to page sections. Slider values: 0-300 ms (default value: 100 ms)')
 			.addSlider(text => text
 				.setLimits(0, 300, 10)
 				.setValue(this.plugin.settings.delayAfterFileOpening)
