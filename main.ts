@@ -40,7 +40,7 @@ export default class RememberCursorPosition extends Plugin {
 			this.db = await this.readDb();
 		}
 		catch (e) {
-			console.error("Remember Cursor Position plugin cant read db: " + e);
+			console.error("Remember Cursor Position plugin can't read database: " + e);
 			this.db = {}
 		}
 
@@ -138,7 +138,7 @@ export default class RememberCursorPosition extends Plugin {
 
 	async saveEphemeralState(st: EphemeralState) {
 		let fileName = this.app.workspace.getActiveFile()?.path;
-		if (fileName && fileName == this.lastLoadedFileName) { //do not save if file changed and was not loaded
+		if (fileName && fileName == this.lastLoadedFileName) { //do not save if file changed or was not loaded
 			this.db[fileName] = st;
 		}
 	}
@@ -210,7 +210,7 @@ export default class RememberCursorPosition extends Plugin {
 
 
 	getEphemeralState(): EphemeralState {
-		// let state: EphemeralState = this.app.workspace.getActiveViewOfType(MarkdownView)?.getEphemeralState(); //doesnt work properly
+		// let state: EphemeralState = this.app.workspace.getActiveViewOfType(MarkdownView)?.getEphemeralState(); //doesn't work properly
 
 		let state: EphemeralState = {};
 		state.scroll = Number(this.app.workspace.getActiveViewOfType(MarkdownView)?.currentMode?.getScroll()?.toFixed(4));
@@ -300,7 +300,7 @@ class SettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Delay after opening a new note')
-			.setDesc('Increase the delay if after opening a note using a link to the note header, not the header but the last position is opened. Can be set to zero (left) if you are not using links to page sections. Slider values: 0-300 ms (default value: 100 ms)')
+			.setDesc('This plugin shouldn\'t scroll if you used a link to the note header like [link](note.md#header). If it did, then increase the delay until everything works. If you are not using links to page sections, set the delay to zero (slider to the left). Slider values: 0-300 ms (default value: 100 ms).')
 			.addSlider(text => text
 				.setLimits(0, 300, 10)
 				.setValue(this.plugin.settings.delayAfterFileOpening)
