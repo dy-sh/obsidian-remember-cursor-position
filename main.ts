@@ -97,8 +97,8 @@ export default class RememberCursorPosition extends Plugin {
 		if (!this.lastEphemeralState)
 			this.lastEphemeralState = st;
 
-		if (!this.isEphemeralStatesEquals(st, this.lastEphemeralState)) {
-			this.saveEphemeralState(st)
+		if (!isNaN(st.scroll) && !this.isEphemeralStatesEquals(st, this.lastEphemeralState)) {
+			this.saveEphemeralState(st);
 			this.lastEphemeralState = st;
 		}
 	}
