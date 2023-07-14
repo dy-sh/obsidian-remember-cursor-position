@@ -1,15 +1,18 @@
-import { App, Plugin, PluginSettingTab, Setting, MarkdownView, TAbstractFile } from 'obsidian';
-import * as CodeMirror from "codemirror";
+import { App, Plugin, PluginSettingTab, Setting, MarkdownView, TAbstractFile, Editor } from 'obsidian';
 
 interface PluginSettings {
 	dbFileName: string;
 	delayAfterFileOpening: number;
+	saveTimer: number;
 }
+
+const SAFE_DB_FLUSH_INTERVAL = 5000;
 
 const DEFAULT_SETTINGS: PluginSettings = {
 	dbFileName: '.obsidian/plugins/remember-cursor-position/cursor-positions.json',
-	delayAfterFileOpening: 100
-}
+	delayAfterFileOpening: 100,
+	saveTimer: SAFE_DB_FLUSH_INTERVAL,
+};
 
 interface EphemeralState {
 	cursor?: {
@@ -28,7 +31,8 @@ interface EphemeralState {
 
 export default class RememberCursorPosition extends Plugin {
 	settings: PluginSettings;
-	db: { [file_path: string]: EphemeralState; };
+	db: { [file_path: string]: EphemeralState };
+	lastSavedDb: { [file_path: string]: EphemeralState };
 	lastEphemeralState: EphemeralState;
 	lastLoadedFileName: string;
 	loadingFile = false;
@@ -38,18 +42,21 @@ export default class RememberCursorPosition extends Plugin {
 
 		try {
 			this.db = await this.readDb();
-		}
-		catch (e) {
-			console.error("Remember Cursor Position plugin can't read database: " + e);
-			this.db = {}
+			this.lastSavedDb = await this.readDb();
+		} catch (e) {
+			console.error(
+				"Remember Cursor Position plugin can\'t read database: " + e
+			);
+			this.db = {};
+			this.lastSavedDb = {};
 		}
 
 		this.addSettingTab(new SettingTab(this.app, this));
 
 		this.registerEvent(
-			this.app.workspace.on('file-open', (file) => this.restoreEphemeralState()),
+			this.app.workspace.on('file-open', (file) => this.restoreEphemeralState())
 		);
-
+		
 
 		this.registerEvent(
 			this.app.workspace.on('quit', () => { this.writeDb(this.db) }),
@@ -65,16 +72,21 @@ export default class RememberCursorPosition extends Plugin {
 		);
 
 		//todo: replace by scroll and mouse cursor move events
-		this.registerInterval(window.setInterval(() => this.checkEphemeralStateChanged(), 100));
+		this.registerInterval(
+			window.setInterval(() => this.checkEphemeralStateChanged(), 100)
+		);
+
+		this.registerInterval(
+			window.setInterval(() => this.writeDb(this.db), this.settings.saveTimer)
+		);
 
 		this.restoreEphemeralState();
 	}
 
-
 	renameFile(file: TAbstractFile, oldPath: string) {
 		let newName = file.path;
 		let oldName = oldPath;
-		this.db[newName] = this.db[oldName]
+		this.db[newName] = this.db[oldName];
 		delete this.db[oldName];
 	}
 
@@ -127,10 +139,8 @@ export default class RememberCursorPosition extends Plugin {
 		if (!state1.scroll && state2.scroll)
 			return false;
 
-		if (state1.scroll) {
-			if (state1.scroll != state2.scroll)
-				return false;
-		}
+		if (state1.scroll && state1.scroll != state2.scroll)
+			return false;
 
 		return true;
 	}
@@ -159,7 +169,7 @@ export default class RememberCursorPosition extends Plugin {
 			if (fileName) {
 				let st = this.db[fileName];
 				if (st) {
-					//waiting for load note		
+					//waiting for load note
 					await this.delay(this.settings.delayAfterFileOpening)
 					let scroll: number;
 					for (let i = 0; i < 20; i++) {
@@ -201,17 +211,23 @@ export default class RememberCursorPosition extends Plugin {
 	async writeDb(db: { [file_path: string]: EphemeralState; }) {
 		//create folder for db file if not exist
 		let newParentFolder = this.settings.dbFileName.substring(0, this.settings.dbFileName.lastIndexOf("/"));
-		if (!await this.app.vault.adapter.exists(newParentFolder))
+		if (!(await this.app.vault.adapter.exists(newParentFolder)))
 			this.app.vault.adapter.mkdir(newParentFolder);
 
-		this.app.vault.adapter.write(this.settings.dbFileName, JSON.stringify(db));
+		if (JSON.stringify(this.db) !== JSON.stringify(this.lastSavedDb)) {
+			this.app.vault.adapter.write(
+				this.settings.dbFileName,
+				JSON.stringify(db)
+			);
+			this.lastSavedDb = JSON.parse(JSON.stringify(db));
+		}
 	}
 
 
 
 	getEphemeralState(): EphemeralState {
 		// let state: EphemeralState = this.app.workspace.getActiveViewOfType(MarkdownView)?.getEphemeralState(); //doesn't work properly
-
+		
 		let state: EphemeralState = {};
 		state.scroll = Number(this.app.workspace.getActiveViewOfType(MarkdownView)?.currentMode?.getScroll()?.toFixed(4));
 
@@ -242,7 +258,7 @@ export default class RememberCursorPosition extends Plugin {
 		if (state.cursor) {
 			let editor = this.getEditor();
 			if (editor) {
-				editor.setSelection(state.cursor.from, state.cursor.to, { scroll: false });
+				editor.setSelection(state.cursor.from, state.cursor.to);
 			}
 		}
 
@@ -253,12 +269,20 @@ export default class RememberCursorPosition extends Plugin {
 		}
 	}
 
-	private getEditor(): CodeMirror.Editor {
-		return this.app.workspace.getActiveViewOfType(MarkdownView)?.sourceMode.cmEditor;
+	private getEditor(): Editor {
+		return this.app.workspace.getActiveViewOfType(MarkdownView)?.editor;
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		let settings: PluginSettings = Object.assign(
+			{},
+			DEFAULT_SETTINGS,
+			await this.loadData()
+		);
+		if (settings?.saveTimer < SAFE_DB_FLUSH_INTERVAL) {
+			settings.saveTimer = SAFE_DB_FLUSH_INTERVAL;
+		}
+		this.settings = settings;
 	}
 
 	async saveSettings() {
@@ -290,24 +314,43 @@ class SettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName('Data file name')
 			.setDesc('Save positions to this file')
-			.addText(text => text
-				.setPlaceholder('Example: cursor-positions.json')
-				.setValue(this.plugin.settings.dbFileName)
-				.onChange(async (value) => {
-					this.plugin.settings.dbFileName = value;
-					await this.plugin.saveSettings();
-				}));
+			.addText((text) =>
+				text
+					.setPlaceholder('Example: cursor-positions.json')
+					.setValue(this.plugin.settings.dbFileName)
+					.onChange(async (value) => {
+						this.plugin.settings.dbFileName = value;
+						await this.plugin.saveSettings();
+					})
+			);
 
 		new Setting(containerEl)
 			.setName('Delay after opening a new note')
-			.setDesc('This plugin shouldn\'t scroll if you used a link to the note header like [link](note.md#header). If it did, then increase the delay until everything works. If you are not using links to page sections, set the delay to zero (slider to the left). Slider values: 0-300 ms (default value: 100 ms).')
-			.addSlider(text => text
-				.setLimits(0, 300, 10)
-				.setValue(this.plugin.settings.delayAfterFileOpening)
-				.onChange(async (value) => {
-					this.plugin.settings.delayAfterFileOpening = value;
-					await this.plugin.saveSettings();
-				}));
+			.setDesc(
+				"This plugin shouldn't scroll if you used a link to the note header like [link](note.md#header). If it did, then increase the delay until everything works. If you are not using links to page sections, set the delay to zero (slider to the left). Slider values: 0-300 ms (default value: 100 ms)."
+			)
+			.addSlider((text) =>
+				text
+					.setLimits(0, 300, 10)
+					.setValue(this.plugin.settings.delayAfterFileOpening)
+					.onChange(async (value) => {
+						this.plugin.settings.delayAfterFileOpening = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName('Delay between saving the cursor position to file')
+			.setDesc(
+				"Useful for multi-device users. If you don't want to wait until closing Obsidian to the cursor position been saved."			)
+			.addSlider((text) =>
+				text
+					.setLimits(SAFE_DB_FLUSH_INTERVAL, SAFE_DB_FLUSH_INTERVAL * 10, 10)
+					.setValue(this.plugin.settings.saveTimer)
+					.onChange(async (value) => {
+						this.plugin.settings.saveTimer = value;
+						await this.plugin.saveSettings();
+					})
+			);
 	}
 }
-
