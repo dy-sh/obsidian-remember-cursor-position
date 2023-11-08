@@ -191,8 +191,6 @@ export default class RememberCursorPosition extends Plugin {
 			this.loadingFile = false;
 		}
 
-	}
-
 	async readDb(): Promise<{ [file_path: string]: EphemeralState; }> {
 		let db: { [file_path: string]: EphemeralState; } = {}
 
