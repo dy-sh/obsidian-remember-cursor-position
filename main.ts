@@ -179,16 +179,10 @@ export default class RememberCursorPosition extends Plugin {
 						await this.delay(10)
 					}
 
-					//if note opened by link like [link](note.md#header), do not scroll it
+					// TODO: if note opened by link like [link](note.md#header), do not scroll it
 					
-					// CHANGE this expression for compatability with the new PROPERTIES view after Obsidian Version 1.4
-					if (scroll === 0 || true) {
-						//force update scroll while note is loading
-						//todo: find better solution to wait for file loaded
-						for (let i = 0; i < 20; i++) {
-							this.setEphemeralState(st);
-							await this.delay(10)
-						}
+					await this.delay(10)
+					this.setEphemeralState(st);
 					}
 				}
 				this.lastEphemeralState = st;
