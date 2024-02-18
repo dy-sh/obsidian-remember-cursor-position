@@ -35,6 +35,7 @@ export default class RememberCursorPosition extends Plugin {
 	lastSavedDb: { [file_path: string]: EphemeralState };
 	lastEphemeralState: EphemeralState;
 	lastLoadedFileName: string;
+	loadedLeafIdList: string[] = [];
 	loadingFile = false;
 
 	async onload() {
@@ -160,14 +161,27 @@ export default class RememberCursorPosition extends Plugin {
 		if (fileName && this.loadingFile && this.lastLoadedFileName == fileName) //if already started loading
 			return;
 
+		let activeLeaf = this.app.workspace.getMostRecentLeaf()
+		if (activeLeaf && this.loadedLeafIdList.includes(activeLeaf.id + ':' + activeLeaf.getViewState().state.file))
+			return;
+		
+		this.loadedLeafIdList = []
+		this.app.workspace.iterateAllLeaves((leaf) => {
+			if (leaf.getViewState().type ==="markdown") {
+				this.loadedLeafIdList.push(leaf.id + ':' +  leaf.getViewState().state.file)
+			}
+		});
+		
 		this.loadingFile = true;
 
 		if (this.lastLoadedFileName != fileName) {
 			this.lastEphemeralState = {}
 			this.lastLoadedFileName = fileName;
+			
+			let st:EphemeralState
 
 			if (fileName) {
-				let st = this.db[fileName];
+				st = this.db[fileName];
 				if (st) {
 					//waiting for load note
 					await this.delay(this.settings.delayAfterFileOpening)
@@ -183,13 +197,13 @@ export default class RememberCursorPosition extends Plugin {
 					
 					await this.delay(10)
 					this.setEphemeralState(st);
-					}
 				}
-				this.lastEphemeralState = st;
-			}
-
-			this.loadingFile = false;
+			} 
+			this.lastEphemeralState = st;
 		}
+
+		this.loadingFile = false;
+	}
 
 	async readDb(): Promise<{ [file_path: string]: EphemeralState; }> {
 		let db: { [file_path: string]: EphemeralState; } = {}
@@ -224,7 +238,7 @@ export default class RememberCursorPosition extends Plugin {
 		
 		let state: EphemeralState = {};
 		state.scroll = Number(this.app.workspace.getActiveViewOfType(MarkdownView)?.currentMode?.getScroll()?.toFixed(4));
-
+		
 		let editor = this.getEditor();
 		if (editor) {
 			let from = editor.getCursor("anchor");
