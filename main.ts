@@ -185,18 +185,16 @@ export default class RememberCursorPosition extends Plugin {
 				if (st) {
 					//waiting for load note
 					await this.delay(this.settings.delayAfterFileOpening)
-					let scroll: number;
-					for (let i = 0; i < 20; i++) {
-						scroll = this.app.workspace.getActiveViewOfType(MarkdownView)?.currentMode?.getScroll();
-						if (scroll !== null)
-							break;
-						await this.delay(10)
-					}
 
-					// TODO: if note opened by link like [link](note.md#header), do not scroll it
-					
-					await this.delay(10)
-					this.setEphemeralState(st);
+					// Don't scroll when a link scrolls and highlights text
+					// i.e. if file is open by links like [link](note.md#header) and wikilinks
+					// See #10, #32, #46, #51
+					let containsFlashingSpan = this.app.workspace.containerEl.querySelector('span.is-flashing');
+
+					if (!containsFlashingSpan) {
+						await this.delay(10)
+						this.setEphemeralState(st);
+					}
 				}
 			} 
 			this.lastEphemeralState = st;
