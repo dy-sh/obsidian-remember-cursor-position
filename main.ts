@@ -1,4 +1,4 @@
-import { App, Plugin, PluginSettingTab, Setting, MarkdownView, TAbstractFile, Editor } from 'obsidian';
+import { App, Plugin, PluginSettingTab, Setting, MarkdownView, TAbstractFile, Editor, TFile } from 'obsidian';
 
 interface PluginSettings {
 	dbFileName: string;
@@ -55,7 +55,7 @@ export default class RememberCursorPosition extends Plugin {
 		this.addSettingTab(new SettingTab(this.app, this));
 
 		this.registerEvent(
-			this.app.workspace.on('file-open', (file) => this.restoreEphemeralState())
+			this.app.workspace.on('file-open', (file) => this.restoreEphemeralState(file))
 		);
 		
 
@@ -155,19 +155,21 @@ export default class RememberCursorPosition extends Plugin {
 	}
 
 
-	async restoreEphemeralState() {
+	async restoreEphemeralState(file?: TFile) {
 		let fileName = this.app.workspace.getActiveFile()?.path;
 
 		if (fileName && this.loadingFile && this.lastLoadedFileName == fileName) //if already started loading
 			return;
 
 		let activeLeaf = this.app.workspace.getMostRecentLeaf()
+		//@ts-ignore no-official-API
 		if (activeLeaf && this.loadedLeafIdList.includes(activeLeaf.id + ':' + activeLeaf.getViewState().state.file))
 			return;
 		
 		this.loadedLeafIdList = []
 		this.app.workspace.iterateAllLeaves((leaf) => {
 			if (leaf.getViewState().type ==="markdown") {
+				//@ts-ignore no-official-API
 				this.loadedLeafIdList.push(leaf.id + ':' +  leaf.getViewState().state.file)
 			}
 		});
@@ -189,7 +191,7 @@ export default class RememberCursorPosition extends Plugin {
 					// Don't scroll when a link scrolls and highlights text
 					// i.e. if file is open by links like [link](note.md#header) and wikilinks
 					// See #10, #32, #46, #51
-					let containsFlashingSpan = this.app.workspace.containerEl.querySelector('span.is-flashing');
+					let containsFlashingSpan = this.app.workspace.containerEl.querySelector('.is-flashing');
 
 					if (!containsFlashingSpan) {
 						await this.delay(10)
@@ -338,6 +340,7 @@ class SettingTab extends PluginSettingTab {
 			.addSlider((text) =>
 				text
 					.setLimits(0, 300, 10)
+					.setDynamicTooltip()
 					.setValue(this.plugin.settings.delayAfterFileOpening)
 					.onChange(async (value) => {
 						this.plugin.settings.delayAfterFileOpening = value;
@@ -352,6 +355,7 @@ class SettingTab extends PluginSettingTab {
 			.addSlider((text) =>
 				text
 					.setLimits(SAFE_DB_FLUSH_INTERVAL, SAFE_DB_FLUSH_INTERVAL * 10, 10)
+					.setDynamicTooltip()
 					.setValue(this.plugin.settings.saveTimer)
 					.onChange(async (value) => {
 						this.plugin.settings.saveTimer = value;
