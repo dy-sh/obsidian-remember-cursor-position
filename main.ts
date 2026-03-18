@@ -162,12 +162,14 @@ export default class RememberCursorPosition extends Plugin {
 			return;
 
 		let activeLeaf = this.app.workspace.getMostRecentLeaf()
+		//@ts-ignore no-official-API
 		if (activeLeaf && this.loadedLeafIdList.includes(activeLeaf.id + ':' + activeLeaf.getViewState().state.file))
 			return;
 		
 		this.loadedLeafIdList = []
 		this.app.workspace.iterateAllLeaves((leaf) => {
 			if (leaf.getViewState().type ==="markdown") {
+				//@ts-ignore no-official-API
 				this.loadedLeafIdList.push(leaf.id + ':' +  leaf.getViewState().state.file)
 			}
 		});
@@ -338,6 +340,7 @@ class SettingTab extends PluginSettingTab {
 			.addSlider((text) =>
 				text
 					.setLimits(0, 300, 10)
+					.setDynamicTooltip()
 					.setValue(this.plugin.settings.delayAfterFileOpening)
 					.onChange(async (value) => {
 						this.plugin.settings.delayAfterFileOpening = value;
@@ -352,6 +355,7 @@ class SettingTab extends PluginSettingTab {
 			.addSlider((text) =>
 				text
 					.setLimits(SAFE_DB_FLUSH_INTERVAL, SAFE_DB_FLUSH_INTERVAL * 10, 10)
+					.setDynamicTooltip()
 					.setValue(this.plugin.settings.saveTimer)
 					.onChange(async (value) => {
 						this.plugin.settings.saveTimer = value;
