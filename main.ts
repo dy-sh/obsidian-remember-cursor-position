@@ -1,4 +1,4 @@
-import { App, Plugin, PluginSettingTab, Setting, MarkdownView, TAbstractFile, Editor, TFile } from 'obsidian';
+import { App, Plugin, PluginSettingTab, Setting, SettingGroup, MarkdownView, TAbstractFile, Editor, TFile } from 'obsidian';
 
 interface PluginSettings {
 	dbFileName: string;
@@ -414,76 +414,80 @@ class SettingTab extends PluginSettingTab {
 					})
 			);
 
-		containerEl.createEl('h3', { text: 'Pruning' });
-
-		new Setting(containerEl)
-			.setName('Remove entries for deleted or missing files')
-			.setDesc(
-				'On startup, remove saved positions for files that no longer exist in the vault. ' +
-				'Disable this if you use junctions, removable drives, or other setups where files may be temporarily unavailable.'
-			)
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.plugin.settings.pruneOrphans)
-					.onChange(async (value) => {
-						this.plugin.settings.pruneOrphans = value;
-						await this.plugin.saveSettings();
-						this.display();
-					})
-			);
-
-		new Setting(containerEl)
-			.setName('Remove entries older than')
-			.setDesc('On startup, remove saved positions for files that have not been visited within the selected period.')
-			.addDropdown((drop) =>
-				drop
-					.addOption('30', '30 days')
-					.addOption('60', '60 days')
-					.addOption('90', '90 days')
-					.addOption('365', '1 year')
-					.addOption('0', 'Never')
-					.setValue(String(this.plugin.settings.maxAgeDays))
-					.onChange(async (value) => {
-						this.plugin.settings.maxAgeDays = Number(value);
-						await this.plugin.saveSettings();
-						this.display();
-					})
-			);
-
-		new Setting(containerEl)
-			.setName('Maximum number of entries to keep')
-			.setDesc('On startup, if the number of saved positions exceeds this limit, the oldest entries are removed. Most-recently visited files are kept.')
-			.addDropdown((drop) =>
-				drop
-					.addOption('50', '50')
-					.addOption('100', '100')
-					.addOption('250', '250')
-					.addOption('500', '500')
-					.addOption('0', 'Never')
-					.setValue(String(this.plugin.settings.maxCount))
-					.onChange(async (value) => {
-						this.plugin.settings.maxCount = Number(value);
-						await this.plugin.saveSettings();
-						this.display();
-					})
-			);
-
 		const { pruneOrphans, maxAgeDays, maxCount } = this.plugin.settings;
 		const pruningEnabled = pruneOrphans || maxAgeDays > 0 || maxCount > 0;
 		const entryCount = Object.keys(this.plugin.db).length;
 
-		new Setting(containerEl)
-			.setName('Apply pruning rules')
-			.setDesc(`Currently tracking ${entryCount} ${entryCount === 1 ? 'entry' : 'entries'}. Pruning runs automatically on next reload; use this to apply immediately.`)
-			.addButton((btn) =>
-				btn
-					.setButtonText('Prune now')
-					.setCta()
-					.setDisabled(!pruningEnabled)
-					.onClick(async () => {
-						this.plugin.pruneDb();
-						await this.plugin.writeDb(this.plugin.db);
-						this.display();
+		new SettingGroup(containerEl)
+			.setHeading('Pruning')
+			.addSetting((setting) =>
+				setting
+					.setName('Remove entries for deleted or missing files')
+					.setDesc(
+						'On startup, remove saved positions for files that no longer exist in the vault. ' +
+						'Disable this if you use junctions, removable drives, or other setups where files may be temporarily unavailable.'
+					)
+					.addToggle((toggle) =>
+						toggle
+							.setValue(this.plugin.settings.pruneOrphans)
+							.onChange(async (value) => {
+								this.plugin.settings.pruneOrphans = value;
+								await this.plugin.saveSettings();
+								this.display();
+							})
+					)
+			)
+			.addSetting((setting) =>
+				setting
+					.setName('Remove entries older than')
+					.setDesc('On startup, remove saved positions for files that have not been visited within the selected period.')
+					.addDropdown((drop) =>
+						drop
+							.addOption('30', '30 days')
+							.addOption('60', '60 days')
+							.addOption('90', '90 days')
+							.addOption('365', '1 year')
+							.addOption('0', 'Never')
+							.setValue(String(this.plugin.settings.maxAgeDays))
+							.onChange(async (value) => {
+								this.plugin.settings.maxAgeDays = Number(value);
+								await this.plugin.saveSettings();
+								this.display();
+							})
+					)
+			)
+			.addSetting((setting) =>
+				setting
+					.setName('Maximum number of entries to keep')
+					.setDesc('On startup, if the number of saved positions exceeds this limit, the oldest entries are removed. Most-recently visited files are kept.')
+					.addDropdown((drop) =>
+						drop
+							.addOption('50', '50')
+							.addOption('100', '100')
+							.addOption('250', '250')
+							.addOption('500', '500')
+							.addOption('0', 'Never')
+							.setValue(String(this.plugin.settings.maxCount))
+							.onChange(async (value) => {
+								this.plugin.settings.maxCount = Number(value);
+								await this.plugin.saveSettings();
+								this.display();
+							})
+					)
+			)
+			.addSetting((setting) =>
+				setting
+					.setName('Apply pruning rules')
+					.setDesc(`Currently tracking ${entryCount} ${entryCount === 1 ? 'entry' : 'entries'}. Pruning runs automatically on next reload; use this to apply immediately.`)
+					.addButton((btn) => {
+						btn.setButtonText('Prune now')
+							.setDisabled(!pruningEnabled);
+						if (pruningEnabled) btn.setCta();
+						btn.onClick(async () => {
+							this.plugin.pruneDb();
+							await this.plugin.writeDb(this.plugin.db);
+							this.display();
+						});
 					})
 			);
 	}
