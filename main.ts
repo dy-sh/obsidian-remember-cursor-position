@@ -428,6 +428,7 @@ class SettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.pruneOrphans = value;
 						await this.plugin.saveSettings();
+						this.display();
 					})
 			);
 
@@ -445,6 +446,7 @@ class SettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.maxAgeDays = Number(value);
 						await this.plugin.saveSettings();
+						this.display();
 					})
 			);
 
@@ -462,6 +464,26 @@ class SettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.maxCount = Number(value);
 						await this.plugin.saveSettings();
+						this.display();
+					})
+			);
+
+		const { pruneOrphans, maxAgeDays, maxCount } = this.plugin.settings;
+		const pruningEnabled = pruneOrphans || maxAgeDays > 0 || maxCount > 0;
+		const entryCount = Object.keys(this.plugin.db).length;
+
+		new Setting(containerEl)
+			.setName('Apply pruning rules')
+			.setDesc(`Currently tracking ${entryCount} ${entryCount === 1 ? 'entry' : 'entries'}. Pruning runs automatically on next reload; use this to apply immediately.`)
+			.addButton((btn) =>
+				btn
+					.setButtonText('Prune now')
+					.setCta()
+					.setDisabled(!pruningEnabled)
+					.onClick(async () => {
+						this.plugin.pruneDb();
+						await this.plugin.writeDb(this.plugin.db);
+						this.display();
 					})
 			);
 	}
