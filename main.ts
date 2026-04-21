@@ -413,5 +413,56 @@ class SettingTab extends PluginSettingTab {
 						);
 					})
 			);
+
+		containerEl.createEl('h3', { text: 'Pruning' });
+
+		new Setting(containerEl)
+			.setName('Remove entries for deleted or missing files')
+			.setDesc(
+				'On startup, remove saved positions for files that no longer exist in the vault. ' +
+				'Disable this if you use junctions, removable drives, or other setups where files may be temporarily unavailable.'
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.pruneOrphans)
+					.onChange(async (value) => {
+						this.plugin.settings.pruneOrphans = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName('Remove entries older than')
+			.setDesc('On startup, remove saved positions for files that have not been visited within the selected period.')
+			.addDropdown((drop) =>
+				drop
+					.addOption('30', '30 days')
+					.addOption('60', '60 days')
+					.addOption('90', '90 days')
+					.addOption('365', '1 year')
+					.addOption('0', 'Never')
+					.setValue(String(this.plugin.settings.maxAgeDays))
+					.onChange(async (value) => {
+						this.plugin.settings.maxAgeDays = Number(value);
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName('Maximum number of entries to keep')
+			.setDesc('On startup, if the number of saved positions exceeds this limit, the oldest entries are removed. Most-recently visited files are kept.')
+			.addDropdown((drop) =>
+				drop
+					.addOption('50', '50')
+					.addOption('100', '100')
+					.addOption('250', '250')
+					.addOption('500', '500')
+					.addOption('0', 'Never')
+					.setValue(String(this.plugin.settings.maxCount))
+					.onChange(async (value) => {
+						this.plugin.settings.maxCount = Number(value);
+						await this.plugin.saveSettings();
+					})
+			);
 	}
 }
