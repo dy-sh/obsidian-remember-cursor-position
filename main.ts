@@ -8,8 +8,10 @@ interface PluginSettings {
 
 const SAFE_DB_FLUSH_INTERVAL = 5000;
 
+const DEFAULT_DB_FILENAME_LEGACY = '.obsidian/plugins/remember-cursor-position/cursor-positions.json';
+
 const DEFAULT_SETTINGS: PluginSettings = {
-	dbFileName: '.obsidian/plugins/remember-cursor-position/cursor-positions.json',
+	dbFileName: '',
 	delayAfterFileOpening: 100,
 	saveTimer: SAFE_DB_FLUSH_INTERVAL,
 };
@@ -289,6 +291,9 @@ export default class RememberCursorPosition extends Plugin {
 		);
 		if (settings?.saveTimer < SAFE_DB_FLUSH_INTERVAL) {
 			settings.saveTimer = SAFE_DB_FLUSH_INTERVAL;
+		}
+		if (!settings.dbFileName || settings.dbFileName === DEFAULT_DB_FILENAME_LEGACY) {
+			settings.dbFileName = this.manifest.dir + '/cursor-positions.json';
 		}
 		this.settings = settings;
 	}
