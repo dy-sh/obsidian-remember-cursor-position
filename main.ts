@@ -4,6 +4,9 @@ interface PluginSettings {
 	dbFileName: string;
 	delayAfterFileOpening: number;
 	saveTimer: number;
+	pruneOrphans: boolean;
+	maxAgeDays: number;   // 0 = disabled
+	maxCount: number;     // 0 = disabled
 }
 
 const SAFE_DB_FLUSH_INTERVAL = 5000;
@@ -14,6 +17,9 @@ const DEFAULT_SETTINGS: PluginSettings = {
 	dbFileName: '',
 	delayAfterFileOpening: 100,
 	saveTimer: SAFE_DB_FLUSH_INTERVAL,
+	pruneOrphans: false,
+	maxAgeDays: 0,
+	maxCount: 0,
 };
 
 interface EphemeralState {
@@ -27,7 +33,8 @@ interface EphemeralState {
 			line: number
 		}
 	},
-	scroll?: number
+	scroll?: number,
+	modified?: number
 }
 
 
@@ -46,6 +53,7 @@ export default class RememberCursorPosition extends Plugin {
 
 		try {
 			this.db = await this.readDb();
+			this.pruneDb();
 			this.lastSavedDb = await this.readDb();
 		} catch (e) {
 			console.error(
@@ -153,7 +161,7 @@ export default class RememberCursorPosition extends Plugin {
 	async saveEphemeralState(st: EphemeralState) {
 		let fileName = this.app.workspace.getActiveFile()?.path;
 		if (fileName && fileName == this.lastLoadedFileName) { //do not save if file changed or was not loaded
-			this.db[fileName] = st;
+			this.db[fileName] = { ...st, modified: Date.now() };
 		}
 	}
 
@@ -208,12 +216,45 @@ export default class RememberCursorPosition extends Plugin {
 		this.loadingFile = false;
 	}
 
+	pruneDb() {
+		const { pruneOrphans, maxAgeDays, maxCount } = this.settings;
+
+		if (pruneOrphans) {
+			for (const key of Object.keys(this.db)) {
+				if (!this.app.vault.getAbstractFileByPath(key)) {
+					delete this.db[key];
+				}
+			}
+		}
+
+		if (maxAgeDays > 0) {
+			const cutoff = Date.now() - maxAgeDays * 86400000;
+			for (const key of Object.keys(this.db)) {
+				if ((this.db[key].modified ?? 0) < cutoff) {
+					delete this.db[key];
+				}
+			}
+		}
+
+		if (maxCount > 0 && Object.keys(this.db).length > maxCount) {
+			const sorted = Object.entries(this.db)
+				.sort((a, b) => (b[1].modified ?? 0) - (a[1].modified ?? 0));
+			this.db = Object.fromEntries(sorted.slice(0, maxCount));
+		}
+	}
+
 	async readDb(): Promise<{ [file_path: string]: EphemeralState; }> {
 		let db: { [file_path: string]: EphemeralState; } = {}
 
 		if (await this.app.vault.adapter.exists(this.settings.dbFileName)) {
 			let data = await this.app.vault.adapter.read(this.settings.dbFileName);
 			db = JSON.parse(data);
+			const now = Date.now();
+			for (const key of Object.keys(db)) {
+				if (db[key].modified === undefined) {
+					db[key].modified = now;
+				}
+			}
 		}
 
 		return db;
