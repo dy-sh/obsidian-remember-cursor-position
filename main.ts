@@ -34,7 +34,7 @@ interface EphemeralState {
 		}
 	},
 	scroll?: number,
-	modified?: number
+	lastModified?: number
 }
 
 
@@ -161,7 +161,7 @@ export default class RememberCursorPosition extends Plugin {
 	async saveEphemeralState(st: EphemeralState) {
 		let fileName = this.app.workspace.getActiveFile()?.path;
 		if (fileName && fileName == this.lastLoadedFileName) { //do not save if file changed or was not loaded
-			this.db[fileName] = { ...st, modified: Date.now() };
+			this.db[fileName] = { ...st, lastModified: Date.now() };
 		}
 	}
 
@@ -230,7 +230,7 @@ export default class RememberCursorPosition extends Plugin {
 		if (maxAgeDays > 0) {
 			const cutoff = Date.now() - maxAgeDays * 86400000;
 			for (const key of Object.keys(this.db)) {
-				if ((this.db[key].modified ?? 0) < cutoff) {
+				if ((this.db[key].lastModified ?? 0) < cutoff) {
 					delete this.db[key];
 				}
 			}
@@ -238,7 +238,7 @@ export default class RememberCursorPosition extends Plugin {
 
 		if (maxCount > 0 && Object.keys(this.db).length > maxCount) {
 			const sorted = Object.entries(this.db)
-				.sort((a, b) => (b[1].modified ?? 0) - (a[1].modified ?? 0));
+				.sort((a, b) => (b[1].lastModified ?? 0) - (a[1].lastModified ?? 0));
 			this.db = Object.fromEntries(sorted.slice(0, maxCount));
 		}
 	}
@@ -251,8 +251,8 @@ export default class RememberCursorPosition extends Plugin {
 			db = JSON.parse(data);
 			const now = Date.now();
 			for (const key of Object.keys(db)) {
-				if (db[key].modified === undefined) {
-					db[key].modified = now;
+				if (db[key].lastModified === undefined) {
+					db[key].lastModified = now;
 				}
 			}
 		}
