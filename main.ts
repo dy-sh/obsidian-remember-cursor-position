@@ -1,4 +1,4 @@
-import { App, Plugin, PluginSettingTab, Setting, SettingGroup, MarkdownView, TAbstractFile, Editor, TFile } from 'obsidian';
+import { App, Plugin, PluginSettingTab, SettingGroup, MarkdownView, TAbstractFile, Editor, TFile } from 'obsidian';
 
 interface PluginSettings {
 	dbFileName: string;
@@ -366,52 +366,59 @@ class SettingTab extends PluginSettingTab {
 
 		containerEl.createEl('h2', { text: 'Remember cursor position - Settings' });
 
-		new Setting(containerEl)
-			.setName('Data file name')
-			.setDesc('Save positions to this file')
-			.addText((text) =>
-				text
-					.setPlaceholder('Example: cursor-positions.json')
-					.setValue(this.plugin.settings.dbFileName)
-					.onChange(async (value) => {
-						this.plugin.settings.dbFileName = value;
-						await this.plugin.saveSettings();
-					})
-			);
-
-		new Setting(containerEl)
-			.setName('Delay after opening a new note')
-			.setDesc(
-				"This plugin shouldn't scroll if you used a link to the note header like [link](note.md#header). If it did, then increase the delay until everything works. If you are not using links to page sections, set the delay to zero (slider to the left). Slider values: 0-300 ms (default value: 100 ms)."
+		new SettingGroup(containerEl)
+			.addSetting((setting) =>
+				setting
+					.setName('Data file name')
+					.setDesc('Save positions to this file')
+					.addText((text) =>
+						text
+							.setPlaceholder('Example: cursor-positions.json')
+							.setValue(this.plugin.settings.dbFileName)
+							.onChange(async (value) => {
+								this.plugin.settings.dbFileName = value;
+								await this.plugin.saveSettings();
+							})
+					)
 			)
-			.addSlider((text) =>
-				text
-					.setLimits(0, 300, 10)
-					.setDynamicTooltip()
-					.setValue(this.plugin.settings.delayAfterFileOpening)
-					.onChange(async (value) => {
-						this.plugin.settings.delayAfterFileOpening = value;
-						await this.plugin.saveSettings();
-					})
-			);
+			.addSetting((setting) =>
+				setting
+					.setName('Delay after opening a new note')
+					.setDesc(
+						"This plugin shouldn't scroll if you used a link to the note header like [link](note.md#header). If it did, then increase the delay until everything works. If you are not using links to page sections, set the delay to zero (slider to the left). Slider values: 0-300 ms (default value: 100 ms)."
+					)
+					.addSlider((text) =>
+						text
+							.setLimits(0, 300, 10)
+							.setDynamicTooltip()
+							.setValue(this.plugin.settings.delayAfterFileOpening)
+							.onChange(async (value) => {
+								this.plugin.settings.delayAfterFileOpening = value;
+								await this.plugin.saveSettings();
+							})
+					)
+			)
+			.addSetting((setting) =>
+				setting
+					.setName('Delay between saving the cursor position to file')
+					.setDesc(
+						"Useful for multi-device users. If you don't want to wait until closing Obsidian to the cursor position been saved."
+					)
+					.addSlider((text) =>
+						text
+							.setLimits(SAFE_DB_FLUSH_INTERVAL, SAFE_DB_FLUSH_INTERVAL * 10, 10)
+							.setDynamicTooltip()
+							.setValue(this.plugin.settings.saveTimer)
+							.onChange(async (value) => {
+								this.plugin.settings.saveTimer = value;
+								await this.plugin.saveSettings();
+								window.clearInterval(this.plugin.saveTimerIntervalId);
+								this.plugin.saveTimerIntervalId = this.plugin.registerInterval(
+									window.setInterval(() => this.plugin.writeDb(this.plugin.db), value)
+								);
+							})
+					)
 
-		new Setting(containerEl)
-			.setName('Delay between saving the cursor position to file')
-			.setDesc(
-				"Useful for multi-device users. If you don't want to wait until closing Obsidian to the cursor position been saved."			)
-			.addSlider((text) =>
-				text
-					.setLimits(SAFE_DB_FLUSH_INTERVAL, SAFE_DB_FLUSH_INTERVAL * 10, 10)
-					.setDynamicTooltip()
-					.setValue(this.plugin.settings.saveTimer)
-					.onChange(async (value) => {
-						this.plugin.settings.saveTimer = value;
-						await this.plugin.saveSettings();
-						window.clearInterval(this.plugin.saveTimerIntervalId);
-						this.plugin.saveTimerIntervalId = this.plugin.registerInterval(
-							window.setInterval(() => this.plugin.writeDb(this.plugin.db), value)
-						);
-					})
 			);
 
 		const { pruneOrphans, maxAgeDays, maxCount } = this.plugin.settings;
