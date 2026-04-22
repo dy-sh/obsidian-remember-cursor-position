@@ -37,6 +37,7 @@ export default class RememberCursorPosition extends Plugin {
 	lastLoadedFileName: string;
 	loadedLeafIdList: string[] = [];
 	loadingFile = false;
+	saveTimerIntervalId: number;
 
 	async onload() {
 		await this.loadSettings();
@@ -77,7 +78,7 @@ export default class RememberCursorPosition extends Plugin {
 			window.setInterval(() => this.checkEphemeralStateChanged(), 100)
 		);
 
-		this.registerInterval(
+		this.saveTimerIntervalId = this.registerInterval(
 			window.setInterval(() => this.writeDb(this.db), this.settings.saveTimer)
 		);
 
@@ -360,6 +361,10 @@ class SettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.saveTimer = value;
 						await this.plugin.saveSettings();
+						window.clearInterval(this.plugin.saveTimerIntervalId);
+						this.plugin.saveTimerIntervalId = this.plugin.registerInterval(
+							window.setInterval(() => this.plugin.writeDb(this.plugin.db), value)
+						);
 					})
 			);
 	}
