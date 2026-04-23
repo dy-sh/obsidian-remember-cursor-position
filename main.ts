@@ -1,9 +1,12 @@
-import { App, Plugin, PluginSettingTab, Setting, MarkdownView, TAbstractFile, Editor, TFile } from 'obsidian';
+import { App, Plugin, PluginSettingTab, SettingGroup, MarkdownView, TAbstractFile, Editor, TFile } from 'obsidian';
 
 interface PluginSettings {
 	dbFileName: string;
 	delayAfterFileOpening: number;
 	saveTimer: number;
+	pruneOrphans: boolean;
+	maxAgeDays: number;   // 0 = disabled
+	maxCount: number;     // 0 = disabled
 }
 
 const SAFE_DB_FLUSH_INTERVAL = 5000;
@@ -14,6 +17,9 @@ const DEFAULT_SETTINGS: PluginSettings = {
 	dbFileName: '',
 	delayAfterFileOpening: 100,
 	saveTimer: SAFE_DB_FLUSH_INTERVAL,
+	pruneOrphans: false,
+	maxAgeDays: 0,
+	maxCount: 0,
 };
 
 interface EphemeralState {
@@ -27,7 +33,8 @@ interface EphemeralState {
 			line: number
 		}
 	},
-	scroll?: number
+	scroll?: number,
+	lastModified?: number
 }
 
 
@@ -46,6 +53,7 @@ export default class RememberCursorPosition extends Plugin {
 
 		try {
 			this.db = await this.readDb();
+			this.pruneDb();
 			this.lastSavedDb = await this.readDb();
 		} catch (e) {
 			console.error(
@@ -153,7 +161,7 @@ export default class RememberCursorPosition extends Plugin {
 	async saveEphemeralState(st: EphemeralState) {
 		let fileName = this.app.workspace.getActiveFile()?.path;
 		if (fileName && fileName == this.lastLoadedFileName) { //do not save if file changed or was not loaded
-			this.db[fileName] = st;
+			this.db[fileName] = { ...st, lastModified: Date.now() };
 		}
 	}
 
@@ -208,12 +216,45 @@ export default class RememberCursorPosition extends Plugin {
 		this.loadingFile = false;
 	}
 
+	pruneDb() {
+		const { pruneOrphans, maxAgeDays, maxCount } = this.settings;
+
+		if (pruneOrphans) {
+			for (const key of Object.keys(this.db)) {
+				if (!this.app.vault.getAbstractFileByPath(key)) {
+					delete this.db[key];
+				}
+			}
+		}
+
+		if (maxAgeDays > 0) {
+			const cutoff = Date.now() - maxAgeDays * 86400000;
+			for (const key of Object.keys(this.db)) {
+				if ((this.db[key].lastModified ?? 0) < cutoff) {
+					delete this.db[key];
+				}
+			}
+		}
+
+		if (maxCount > 0 && Object.keys(this.db).length > maxCount) {
+			const sorted = Object.entries(this.db)
+				.sort((a, b) => (b[1].lastModified ?? 0) - (a[1].lastModified ?? 0));
+			this.db = Object.fromEntries(sorted.slice(0, maxCount));
+		}
+	}
+
 	async readDb(): Promise<{ [file_path: string]: EphemeralState; }> {
 		let db: { [file_path: string]: EphemeralState; } = {}
 
 		if (await this.app.vault.adapter.exists(this.settings.dbFileName)) {
 			let data = await this.app.vault.adapter.read(this.settings.dbFileName);
 			db = JSON.parse(data);
+			const now = Date.now();
+			for (const key of Object.keys(db)) {
+				if (db[key].lastModified === undefined) {
+					db[key].lastModified = now;
+				}
+			}
 		}
 
 		return db;
@@ -325,51 +366,135 @@ class SettingTab extends PluginSettingTab {
 
 		containerEl.createEl('h2', { text: 'Remember cursor position - Settings' });
 
-		new Setting(containerEl)
-			.setName('Data file name')
-			.setDesc('Save positions to this file')
-			.addText((text) =>
-				text
-					.setPlaceholder('Example: cursor-positions.json')
-					.setValue(this.plugin.settings.dbFileName)
-					.onChange(async (value) => {
-						this.plugin.settings.dbFileName = value;
-						await this.plugin.saveSettings();
-					})
-			);
-
-		new Setting(containerEl)
-			.setName('Delay after opening a new note')
-			.setDesc(
-				"This plugin shouldn't scroll if you used a link to the note header like [link](note.md#header). If it did, then increase the delay until everything works. If you are not using links to page sections, set the delay to zero (slider to the left). Slider values: 0-300 ms (default value: 100 ms)."
+		new SettingGroup(containerEl)
+			.addSetting((setting) =>
+				setting
+					.setName('Data file name')
+					.setDesc('Save positions to this file')
+					.addText((text) =>
+						text
+							.setPlaceholder('Example: cursor-positions.json')
+							.setValue(this.plugin.settings.dbFileName)
+							.onChange(async (value) => {
+								this.plugin.settings.dbFileName = value;
+								await this.plugin.saveSettings();
+							})
+					)
 			)
-			.addSlider((text) =>
-				text
-					.setLimits(0, 300, 10)
-					.setDynamicTooltip()
-					.setValue(this.plugin.settings.delayAfterFileOpening)
-					.onChange(async (value) => {
-						this.plugin.settings.delayAfterFileOpening = value;
-						await this.plugin.saveSettings();
-					})
+			.addSetting((setting) =>
+				setting
+					.setName('Delay after opening a new note')
+					.setDesc(
+						"This plugin shouldn't scroll if you used a link to the note header like [link](note.md#header). If it did, then increase the delay until everything works. If you are not using links to page sections, set the delay to zero (slider to the left). Slider values: 0-300 ms (default value: 100 ms)."
+					)
+					.addSlider((text) =>
+						text
+							.setLimits(0, 300, 10)
+							.setDynamicTooltip()
+							.setValue(this.plugin.settings.delayAfterFileOpening)
+							.onChange(async (value) => {
+								this.plugin.settings.delayAfterFileOpening = value;
+								await this.plugin.saveSettings();
+							})
+					)
+			)
+			.addSetting((setting) =>
+				setting
+					.setName('Delay between saving the cursor position to file')
+					.setDesc(
+						"Useful for multi-device users. If you don't want to wait until closing Obsidian to the cursor position been saved."
+					)
+					.addSlider((text) =>
+						text
+							.setLimits(SAFE_DB_FLUSH_INTERVAL, SAFE_DB_FLUSH_INTERVAL * 10, 10)
+							.setDynamicTooltip()
+							.setValue(this.plugin.settings.saveTimer)
+							.onChange(async (value) => {
+								this.plugin.settings.saveTimer = value;
+								await this.plugin.saveSettings();
+								window.clearInterval(this.plugin.saveTimerIntervalId);
+								this.plugin.saveTimerIntervalId = this.plugin.registerInterval(
+									window.setInterval(() => this.plugin.writeDb(this.plugin.db), value)
+								);
+							})
+					)
+
 			);
 
-		new Setting(containerEl)
-			.setName('Delay between saving the cursor position to file')
-			.setDesc(
-				"Useful for multi-device users. If you don't want to wait until closing Obsidian to the cursor position been saved."			)
-			.addSlider((text) =>
-				text
-					.setLimits(SAFE_DB_FLUSH_INTERVAL, SAFE_DB_FLUSH_INTERVAL * 10, 10)
-					.setDynamicTooltip()
-					.setValue(this.plugin.settings.saveTimer)
-					.onChange(async (value) => {
-						this.plugin.settings.saveTimer = value;
-						await this.plugin.saveSettings();
-						window.clearInterval(this.plugin.saveTimerIntervalId);
-						this.plugin.saveTimerIntervalId = this.plugin.registerInterval(
-							window.setInterval(() => this.plugin.writeDb(this.plugin.db), value)
-						);
+		const { pruneOrphans, maxAgeDays, maxCount } = this.plugin.settings;
+		const pruningEnabled = pruneOrphans || maxAgeDays > 0 || maxCount > 0;
+		const entryCount = Object.keys(this.plugin.db).length;
+
+		new SettingGroup(containerEl)
+			.setHeading('Pruning')
+			.addSetting((setting) =>
+				setting
+					.setName('Remove entries for deleted or missing files')
+					.setDesc(
+						'On startup, remove saved positions for files that no longer exist in the vault. ' +
+						'Disable this if you use junctions, removable drives, or other setups where files may be temporarily unavailable.'
+					)
+					.addToggle((toggle) =>
+						toggle
+							.setValue(this.plugin.settings.pruneOrphans)
+							.onChange(async (value) => {
+								this.plugin.settings.pruneOrphans = value;
+								await this.plugin.saveSettings();
+								this.display();
+							})
+					)
+			)
+			.addSetting((setting) =>
+				setting
+					.setName('Remove entries older than')
+					.setDesc('On startup, remove saved positions for files that have not been visited within the selected period.')
+					.addDropdown((drop) =>
+						drop
+							.addOption('30', '30 days')
+							.addOption('60', '60 days')
+							.addOption('90', '90 days')
+							.addOption('365', '1 year')
+							.addOption('0', 'Never')
+							.setValue(String(this.plugin.settings.maxAgeDays))
+							.onChange(async (value) => {
+								this.plugin.settings.maxAgeDays = Number(value);
+								await this.plugin.saveSettings();
+								this.display();
+							})
+					)
+			)
+			.addSetting((setting) =>
+				setting
+					.setName('Maximum number of entries to keep')
+					.setDesc('On startup, if the number of saved positions exceeds this limit, the oldest entries are removed. Most-recently visited files are kept.')
+					.addDropdown((drop) =>
+						drop
+							.addOption('50', '50')
+							.addOption('100', '100')
+							.addOption('250', '250')
+							.addOption('500', '500')
+							.addOption('0', 'Never')
+							.setValue(String(this.plugin.settings.maxCount))
+							.onChange(async (value) => {
+								this.plugin.settings.maxCount = Number(value);
+								await this.plugin.saveSettings();
+								this.display();
+							})
+					)
+			)
+			.addSetting((setting) =>
+				setting
+					.setName('Apply pruning rules')
+					.setDesc(`Currently tracking ${entryCount} ${entryCount === 1 ? 'entry' : 'entries'}. Pruning runs automatically on next reload; use this to apply immediately.`)
+					.addButton((btn) => {
+						btn.setButtonText('Prune now')
+							.setDisabled(!pruningEnabled);
+						if (pruningEnabled) btn.setCta();
+						btn.onClick(async () => {
+							this.plugin.pruneDb();
+							await this.plugin.writeDb(this.plugin.db);
+							this.display();
+						});
 					})
 			);
 	}
