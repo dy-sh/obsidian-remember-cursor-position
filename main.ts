@@ -1,5 +1,7 @@
 import { App, Plugin, PluginSettingTab, SettingGroup, MarkdownView, TAbstractFile, Editor, TFile } from 'obsidian';
 
+type DefaultPosition = 'beginning' | 'end' | 'default' | 'beforeFootnotes';
+
 interface PluginSettings {
 	dbFileName: string;
 	delayAfterFileOpening: number;
@@ -7,6 +9,7 @@ interface PluginSettings {
 	pruneOrphans: boolean;
 	maxAgeDays: number;   // 0 = disabled
 	maxCount: number;     // 0 = disabled
+	defaultPosition: DefaultPosition;
 }
 
 const SAFE_DB_FLUSH_INTERVAL = 5000;
@@ -20,6 +23,7 @@ const DEFAULT_SETTINGS: PluginSettings = {
 	pruneOrphans: false,
 	maxAgeDays: 0,
 	maxCount: 0,
+	defaultPosition: 'default',
 };
 
 interface EphemeralState {
@@ -208,6 +212,21 @@ export default class RememberCursorPosition extends Plugin {
 						await this.delay(10)
 						this.setEphemeralState(st);
 					}
+				} else if (this.settings.defaultPosition !== 'default') {
+					await this.delay(this.settings.delayAfterFileOpening)
+
+					let containsFlashingSpan = this.app.workspace.containerEl.querySelector('.is-flashing');
+
+					if (!containsFlashingSpan) {
+						await this.delay(10)
+						if (this.settings.defaultPosition === 'beginning') {
+							await this.setCursorToBeginning(file || this.app.workspace.getActiveFile());
+						} else if (this.settings.defaultPosition === 'end') {
+							this.setCursorToEnd();
+						} else if (this.settings.defaultPosition === 'beforeFootnotes') {
+							await this.setCursorToBeforeFootnotes(file || this.app.workspace.getActiveFile());
+						}
+					}
 				}
 			} 
 			this.lastEphemeralState = st;
@@ -321,6 +340,67 @@ export default class RememberCursorPosition extends Plugin {
 		}
 	}
 
+	private async setCursorToBeginning(file: TFile) {
+		let content = await this.app.vault.read(file);
+		let lines = content.split('\n');
+		let startLine = 0;
+		if (lines.length > 0 && lines[0].trim() === '---') {
+			for (let i = 1; i < lines.length; i++) {
+				if (lines[i].trim() === '---') {
+					startLine = i + 1;
+					break;
+				}
+			}
+		}
+		let editor = this.getEditor();
+		if (editor) {
+			if (startLine >= editor.lineCount()) {
+				startLine = Math.max(0, editor.lineCount() - 1);
+			}
+			editor.setCursor({ line: startLine, ch: 0 });
+		}
+	}
+
+	private setCursorToEnd() {
+		let editor = this.getEditor();
+		if (editor) {
+			let lastLine = editor.lastLine();
+			let lastLineLength = editor.getLine(lastLine).length;
+			editor.setCursor({ line: lastLine, ch: lastLineLength });
+		}
+	}
+
+	private async setCursorToBeforeFootnotes(file: TFile) {
+		let content = await this.app.vault.read(file);
+		let lines = content.split('\n');
+		let footnoteLine = -1;
+		for (let i = 0; i < lines.length; i++) {
+			if (/^\s*\[\^[^\]]+\]:\s/.test(lines[i])) {
+				footnoteLine = i;
+				break;
+			}
+		}
+		if (footnoteLine === -1) {
+			this.setCursorToEnd();
+			return;
+		}
+		let targetLine = footnoteLine - 1;
+		while (targetLine >= 0 && lines[targetLine].trim() === '') {
+			targetLine--;
+		}
+		if (targetLine < 0) {
+			targetLine = 0;
+		}
+		let editor = this.getEditor();
+		if (editor) {
+			if (targetLine >= editor.lineCount()) {
+				targetLine = Math.max(0, editor.lineCount() - 1);
+			}
+			let ch = editor.getLine(targetLine).length;
+			editor.setCursor({ line: targetLine, ch: ch });
+		}
+	}
+
 	private getEditor(): Editor {
 		return this.app.workspace.getActiveViewOfType(MarkdownView)?.editor;
 	}
@@ -367,6 +447,25 @@ class SettingTab extends PluginSettingTab {
 		containerEl.createEl('h2', { text: 'Remember cursor position - Settings' });
 
 		new SettingGroup(containerEl)
+			.addSetting((setting) =>
+				setting
+					.setName('Default cursor position')
+					.setDesc(
+						'When no saved position exists for a file, jump to this position. "Default" means do nothing.'
+					)
+					.addDropdown((drop) =>
+						drop
+							.addOption('beginning', 'Beginning')
+							.addOption('end', 'End')
+							.addOption('beforeFootnotes', 'Before footnotes')
+							.addOption('default', 'Default (do nothing)')
+							.setValue(this.plugin.settings.defaultPosition)
+							.onChange(async (value) => {
+								this.plugin.settings.defaultPosition = value as DefaultPosition;
+								await this.plugin.saveSettings();
+							})
+					)
+			)
 			.addSetting((setting) =>
 				setting
 					.setName('Data file name')
