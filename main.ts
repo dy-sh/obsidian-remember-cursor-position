@@ -358,6 +358,7 @@ export default class RememberCursorPosition extends Plugin {
 				startLine = Math.max(0, editor.lineCount() - 1);
 			}
 			editor.setCursor({ line: startLine, ch: 0 });
+			editor.scrollIntoView({ from: { line: startLine, ch: 0 }, to: { line: startLine, ch: 0 } }, true);
 		}
 	}
 
@@ -367,6 +368,7 @@ export default class RememberCursorPosition extends Plugin {
 			let lastLine = editor.lastLine();
 			let lastLineLength = editor.getLine(lastLine).length;
 			editor.setCursor({ line: lastLine, ch: lastLineLength });
+			editor.scrollIntoView({ from: { line: lastLine, ch: 0 }, to: { line: lastLine, ch: lastLineLength } }, true);
 		}
 	}
 
@@ -398,6 +400,7 @@ export default class RememberCursorPosition extends Plugin {
 			}
 			let ch = editor.getLine(targetLine).length;
 			editor.setCursor({ line: targetLine, ch: ch });
+			editor.scrollIntoView({ from: { line: targetLine, ch: 0 }, to: { line: targetLine, ch: ch } }, true);
 		}
 	}
 
