@@ -11,10 +11,14 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    # Skip the run that is created by our own version-bump commit.
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -24,40 +28,39 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Check version
+      - name: Determine bump type
+        id: bump
+        run: |
+          MSG=$(git log -1 --pretty=%B)
+          if echo "$MSG" | grep -qiE '#major'; then
+            echo "type=major" >> "$GITHUB_OUTPUT"
+          elif echo "$MSG" | grep -qiE '#minor'; then
+            echo "type=minor" >> "$GITHUB_OUTPUT"
+          else
+            echo "type=patch" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump version
         id: version
         run: |
-          MANIFEST_VERSION=$(node -p "require('./manifest.json').version")
-          PACKAGE_VERSION=$(node -p "require('./package.json').version")
-
-          if [ "$MANIFEST_VERSION" != "$PACKAGE_VERSION" ]; then
-            echo "manifest.json version ($MANIFEST_VERSION) and package.json version ($PACKAGE_VERSION) differ"
-            exit 1
-          fi
-
-          TAG="$MANIFEST_VERSION"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-
-          if git ls-remote --tags origin "refs/tags/$TAG" | grep -q "$TAG"; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
+          NEW_VERSION=$(node version-bump.mjs "${{ steps.bump.outputs.type }}")
+          echo "tag=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Bumped to $NEW_VERSION (${{ steps.bump.outputs.type }})"
 
       - name: Build
-        if: steps.version.outputs.exists == 'false'
         run: npm run build
 
-      - name: Create tag
-        if: steps.version.outputs.exists == 'false'
+      - name: Commit version bump and tag
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add manifest.json package.json versions.json
+          git commit -m "chore: bump version to ${{ steps.version.outputs.tag }} [skip ci]"
           git tag "${{ steps.version.outputs.tag }}"
+          git push origin HEAD:master
           git push origin "${{ steps.version.outputs.tag }}"
 
       - name: Create GitHub Release
-        if: steps.version.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
