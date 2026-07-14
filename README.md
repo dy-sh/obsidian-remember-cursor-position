@@ -28,7 +28,7 @@ Each time you move the cursor or scroll in a note, the plugin records that state
 
 ### Manual installation
 
-1. Download the latest release from the [releases page](https://github.com/LorenBll/obsidian-remember-cursor-position/releases)
+1. Download the latest release from the [releases page](https://github.com/dy-sh/obsidian-remember-cursor-position/releases)
 2. Extract the files into your vault's `.obsidian/plugins/remember-cursor-position/` directory
 3. Enable the plugin in **Settings** → **Community plugins**
 
@@ -46,4 +46,4 @@ Each time you move the cursor or scroll in a note, the plugin records that state
 
 ## Support
 
-If you find a bug or have a feature request, please [open an issue](https://github.com/LorenBll/obsidian-remember-cursor-position/issues).
+If you find a bug or have a feature request, please [open an issue](https://github.com/dy-sh/obsidian-remember-cursor-position/issues).
