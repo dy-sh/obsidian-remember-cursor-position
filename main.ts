@@ -122,10 +122,12 @@ export default class RememberCursorPosition extends Plugin {
 
 		let st = this.getEphemeralState();
 
+		let hadPriorState = this.lastEphemeralState && Object.keys(this.lastEphemeralState).length > 0;
+
 		if (!this.lastEphemeralState)
 			this.lastEphemeralState = st;
 
-		if (!isNaN(st.scroll) && !this.isEphemeralStatesEquals(st, this.lastEphemeralState)) {
+		if (!isNaN(st.scroll) && (!hadPriorState || !this.isEphemeralStatesEquals(st, this.lastEphemeralState))) {
 			this.saveEphemeralState(st);
 			this.lastEphemeralState = st;
 		}
@@ -568,14 +570,14 @@ class SettingTab extends PluginSettingTab {
 			.addSetting((setting) =>
 				setting
 					.setName('Maximum number of entries to keep')
-					.setDesc('On startup, if the number of saved positions exceeds this limit, the oldest entries are removed. Most-recently visited files are kept.')
+					.setDesc('On startup, if the number of saved positions exceeds this limit, the oldest entries are removed. Most-recently visited files are kept. "None" means no maximum limit.')
 					.addDropdown((drop) =>
 						drop
 							.addOption('50', '50')
 							.addOption('100', '100')
 							.addOption('250', '250')
 							.addOption('500', '500')
-							.addOption('0', 'Never')
+							.addOption('0', 'None')
 							.setValue(String(this.plugin.settings.maxCount))
 							.onChange(async (value) => {
 								this.plugin.settings.maxCount = Number(value);
