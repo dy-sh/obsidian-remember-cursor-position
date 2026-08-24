@@ -1,6 +1,7 @@
 import typescript from '@rollup/plugin-typescript';
 import {nodeResolve} from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
+import terser from '@rollup/plugin-terser';
 
 const banner = 
 `/*
@@ -9,19 +10,26 @@ if you want to view the source visit the plugins github repository
 */
 `;
 
+const isProd = process.env.NODE_ENV === 'production';
+
 export default {
   input: 'main.ts',
   output: {
     dir: '.',
-    sourcemap: 'inline',
+    sourcemap: isProd ? false : 'inline',
     format: 'cjs',
     exports: 'default',
     banner,
   },
+  treeshake: { moduleSideEffects: false },
   external: ['obsidian'],
   plugins: [
-    typescript(),
+    typescript({
+      declaration: false,
+      declarationMap: false,
+    }),
     nodeResolve({browser: true}),
     commonjs(),
+    ...(isProd ? [terser()] : []),
   ]
 };

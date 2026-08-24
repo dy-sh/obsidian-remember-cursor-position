@@ -1,605 +1,74 @@
-import { App, Plugin, PluginSettingTab, SettingGroup, MarkdownView, TAbstractFile, Editor, TFile } from 'obsidian';
-
-type DefaultPosition = 'beginning' | 'end' | 'default' | 'beforeFootnotes';
-
-interface PluginSettings {
-	dbFileName: string;
-	delayAfterFileOpening: number;
-	saveTimer: number;
-	pruneOrphans: boolean;
-	maxAgeDays: number;   // 0 = disabled
-	maxCount: number;     // 0 = disabled
-	defaultPosition: DefaultPosition;
-}
-
-const SAFE_DB_FLUSH_INTERVAL = 5000;
-
-const DEFAULT_DB_FILENAME_LEGACY = '.obsidian/plugins/remember-cursor-position/cursor-positions.json';
-
-const DEFAULT_SETTINGS: PluginSettings = {
-	dbFileName: '',
-	delayAfterFileOpening: 100,
-	saveTimer: SAFE_DB_FLUSH_INTERVAL,
-	pruneOrphans: false,
-	maxAgeDays: 0,
-	maxCount: 0,
-	defaultPosition: 'default',
-};
-
-interface EphemeralState {
-	cursor?: {
-		from: {
-			ch: number
-			line: number
-		},
-		to: {
-			ch: number
-			line: number
-		}
-	},
-	scroll?: number,
-	lastModified?: number
-}
+import { Plugin } from 'obsidian';
+import { SettingTab } from './src/settings-tab';
+import { PluginSettings, SAFE_DB_FLUSH_INTERVAL, DEFAULT_SETTINGS } from './src/types';
+import { CursorPositionDatabase } from './src/database';
+import { PositionManager } from './src/position-manager';
 
 
 export default class RememberCursorPosition extends Plugin {
-	settings: PluginSettings;
-	db: { [file_path: string]: EphemeralState };
-	lastSavedDb: { [file_path: string]: EphemeralState };
-	lastEphemeralState: EphemeralState;
-	lastLoadedFileName: string;
-	loadedLeafIdList: string[] = [];
-	loadingFile = false;
-	saveTimerIntervalId: number;
+	settings!: PluginSettings;
+	database!: CursorPositionDatabase;
+	manager!: PositionManager;
+	saveTimerIntervalId!: number;
 
 	async onload() {
 		await this.loadSettings();
 
-		try {
-			this.db = await this.readDb();
-			this.pruneDb();
-			this.lastSavedDb = await this.readDb();
-		} catch (e) {
-			console.error(
-				"Remember Cursor Position plugin can\'t read database: " + e
-			);
-			this.db = {};
-			this.lastSavedDb = {};
-		}
+		await this.database.readDb();
+		this.database.pruneDb();
 
 		this.addSettingTab(new SettingTab(this.app, this));
 
-		this.registerEvent(
-			this.app.workspace.on('file-open', (file) => this.restoreEphemeralState(file))
-		);
-		
+		// Restore patches: view.setEphemeralState argument rewriting (the
+		// primary, flicker-free restore path — core applies our saved position
+		// in its own pipeline slot) and openLinkText link detection (saved
+		// positions yield to link targets). Both are undone on unload.
+		this.manager.installPatches(cleanup => this.register(cleanup));
 
-		this.registerEvent(
-			this.app.workspace.on('quit', () => { this.writeDb(this.db) }),
-		);
-
-
-		this.registerEvent(
-			this.app.vault.on('rename', (file, oldPath) => this.renameFile(file, oldPath)),
-		);
-
-		this.registerEvent(
-			this.app.vault.on('delete', (file) => this.deleteFile(file)),
-		);
+		this.registerEvent(this.app.workspace.on('file-open', () => this.manager.restoreEphemeralState()));
+		this.registerEvent(this.app.workspace.on('quit', () => { this.database.writeDb() }));
+		this.registerEvent(this.app.vault.on('rename', (file, oldPath) => this.manager.renameFile(file, oldPath)));
+		this.registerEvent(this.app.vault.on('delete', (file) => this.manager.deleteFile(file)));
 
 		//todo: replace by scroll and mouse cursor move events
 		this.registerInterval(
-			window.setInterval(() => this.checkEphemeralStateChanged(), 100)
+			window.setInterval(() => this.manager.checkEphemeralStateChanged(), 100)
 		);
 
 		this.saveTimerIntervalId = this.registerInterval(
-			window.setInterval(() => this.writeDb(this.db), this.settings.saveTimer)
+			window.setInterval(() => this.database.writeDb(), this.settings.saveTimer)
 		);
 
-		this.restoreEphemeralState();
+		this.manager.restoreEphemeralState();
 	}
 
-	renameFile(file: TAbstractFile, oldPath: string) {
-		let newName = file.path;
-		let oldName = oldPath;
-		this.db[newName] = this.db[oldName];
-		delete this.db[oldName];
-	}
-
-
-	deleteFile(file: TAbstractFile) {
-		let fileName = file.path;
-		delete this.db[fileName];
-	}
-
-
-	checkEphemeralStateChanged() {
-		let fileName = this.app.workspace.getActiveFile()?.path;
-
-		//waiting for load new file
-		if (!fileName || !this.lastLoadedFileName || fileName != this.lastLoadedFileName || this.loadingFile)
-			return;
-
-		let st = this.getEphemeralState();
-
-		let hadPriorState = this.lastEphemeralState && Object.keys(this.lastEphemeralState).length > 0;
-
-		if (!this.lastEphemeralState)
-			this.lastEphemeralState = st;
-
-		if (!isNaN(st.scroll) && (!hadPriorState || !this.isEphemeralStatesEquals(st, this.lastEphemeralState))) {
-			this.saveEphemeralState(st);
-			this.lastEphemeralState = st;
-		}
-	}
-
-	isEphemeralStatesEquals(state1: EphemeralState, state2: EphemeralState): boolean {
-		if (state1.cursor && !state2.cursor)
-			return false;
-
-		if (!state1.cursor && state2.cursor)
-			return false;
-
-		if (state1.cursor) {
-			if (state1.cursor.from.ch != state2.cursor.from.ch)
-				return false;
-			if (state1.cursor.from.line != state2.cursor.from.line)
-				return false;
-			if (state1.cursor.to.ch != state2.cursor.to.ch)
-				return false;
-			if (state1.cursor.to.line != state2.cursor.to.line)
-				return false;
-		}
-
-		if (state1.scroll && !state2.scroll)
-			return false;
-
-		if (!state1.scroll && state2.scroll)
-			return false;
-
-		if (state1.scroll && state1.scroll != state2.scroll)
-			return false;
-
-		return true;
-	}
-
-
-	async saveEphemeralState(st: EphemeralState) {
-		let fileName = this.app.workspace.getActiveFile()?.path;
-		if (fileName && fileName == this.lastLoadedFileName) { //do not save if file changed or was not loaded
-			this.db[fileName] = { ...st, lastModified: Date.now() };
-		}
-	}
-
-
-	async restoreEphemeralState(file?: TFile) {
-		let fileName = this.app.workspace.getActiveFile()?.path;
-
-		if (fileName && this.loadingFile && this.lastLoadedFileName == fileName) //if already started loading
-			return;
-
-		let activeLeaf = this.app.workspace.getMostRecentLeaf()
-		//@ts-ignore no-official-API
-		if (activeLeaf && this.loadedLeafIdList.includes(activeLeaf.id + ':' + activeLeaf.getViewState().state.file))
-			return;
-		
-		this.loadedLeafIdList = []
-		this.app.workspace.iterateAllLeaves((leaf) => {
-			if (leaf.getViewState().type ==="markdown") {
-				//@ts-ignore no-official-API
-				this.loadedLeafIdList.push(leaf.id + ':' +  leaf.getViewState().state.file)
-			}
-		});
-		
-		this.loadingFile = true;
-
-		if (this.lastLoadedFileName != fileName) {
-			this.lastEphemeralState = {}
-			this.lastLoadedFileName = fileName;
-			
-			let st:EphemeralState
-
-			if (fileName) {
-				st = this.db[fileName];
-				if (st) {
-					//waiting for load note
-					await this.delay(this.settings.delayAfterFileOpening)
-
-					// Don't scroll when a link scrolls and highlights text
-					// i.e. if file is open by links like [link](note.md#header) and wikilinks
-					// See #10, #32, #46, #51
-					let containsFlashingSpan = this.app.workspace.containerEl.querySelector('.is-flashing');
-
-					if (!containsFlashingSpan) {
-						await this.delay(10)
-						this.setEphemeralState(st);
-					}
-				} else if (this.settings.defaultPosition !== 'default') {
-					await this.delay(this.settings.delayAfterFileOpening)
-
-					let containsFlashingSpan = this.app.workspace.containerEl.querySelector('.is-flashing');
-
-					if (!containsFlashingSpan) {
-						await this.delay(10)
-						if (this.settings.defaultPosition === 'beginning') {
-							await this.setCursorToBeginning(file || this.app.workspace.getActiveFile());
-						} else if (this.settings.defaultPosition === 'end') {
-							this.setCursorToEnd();
-						} else if (this.settings.defaultPosition === 'beforeFootnotes') {
-							await this.setCursorToBeforeFootnotes(file || this.app.workspace.getActiveFile());
-						}
-					}
-				}
-			} 
-			this.lastEphemeralState = st;
-		}
-
-		this.loadingFile = false;
-	}
-
-	pruneDb() {
-		const { pruneOrphans, maxAgeDays, maxCount } = this.settings;
-
-		if (pruneOrphans) {
-			for (const key of Object.keys(this.db)) {
-				if (!this.app.vault.getAbstractFileByPath(key)) {
-					delete this.db[key];
-				}
-			}
-		}
-
-		if (maxAgeDays > 0) {
-			const cutoff = Date.now() - maxAgeDays * 86400000;
-			for (const key of Object.keys(this.db)) {
-				if ((this.db[key].lastModified ?? 0) < cutoff) {
-					delete this.db[key];
-				}
-			}
-		}
-
-		if (maxCount > 0 && Object.keys(this.db).length > maxCount) {
-			const sorted = Object.entries(this.db)
-				.sort((a, b) => (b[1].lastModified ?? 0) - (a[1].lastModified ?? 0));
-			this.db = Object.fromEntries(sorted.slice(0, maxCount));
-		}
-	}
-
-	async readDb(): Promise<{ [file_path: string]: EphemeralState; }> {
-		let db: { [file_path: string]: EphemeralState; } = {}
-
-		if (await this.app.vault.adapter.exists(this.settings.dbFileName)) {
-			let data = await this.app.vault.adapter.read(this.settings.dbFileName);
-			db = JSON.parse(data);
-			const now = Date.now();
-			for (const key of Object.keys(db)) {
-				if (db[key].lastModified === undefined) {
-					db[key].lastModified = now;
-				}
-			}
-		}
-
-		return db;
-	}
-
-	async writeDb(db: { [file_path: string]: EphemeralState; }) {
-		//create folder for db file if not exist
-		let newParentFolder = this.settings.dbFileName.substring(0, this.settings.dbFileName.lastIndexOf("/"));
-		if (!(await this.app.vault.adapter.exists(newParentFolder)))
-			this.app.vault.adapter.mkdir(newParentFolder);
-
-		if (JSON.stringify(this.db) !== JSON.stringify(this.lastSavedDb)) {
-			this.app.vault.adapter.write(
-				this.settings.dbFileName,
-				JSON.stringify(db)
-			);
-			this.lastSavedDb = JSON.parse(JSON.stringify(db));
-		}
-	}
-
-
-
-	getEphemeralState(): EphemeralState {
-		// let state: EphemeralState = this.app.workspace.getActiveViewOfType(MarkdownView)?.getEphemeralState(); //doesn't work properly
-		
-		let state: EphemeralState = {};
-		state.scroll = Number(this.app.workspace.getActiveViewOfType(MarkdownView)?.currentMode?.getScroll()?.toFixed(4));
-		
-		let editor = this.getEditor();
-		if (editor) {
-			let from = editor.getCursor("anchor");
-			let to = editor.getCursor("head");
-			if (from && to) {
-				state.cursor = {
-					from: {
-						ch: from.ch,
-						line: from.line
-					},
-					to: {
-						ch: to.ch,
-						line: to.line
-					}
-				}
-			}
-		}
-
-		return state;
-	}
-
-	setEphemeralState(state: EphemeralState) {
-		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-
-		if (state.cursor) {
-			let editor = this.getEditor();
-			if (editor) {
-				editor.setSelection(state.cursor.from, state.cursor.to);
-			}
-		}
-
-		if (view && state.scroll) {
-			view.setEphemeralState(state);
-			// view.previewMode.applyScroll(state.scroll);
-			// view.sourceMode.applyScroll(state.scroll);
-		}
-	}
-
-	private async setCursorToBeginning(file: TFile) {
-		let content = await this.app.vault.read(file);
-		let lines = content.split('\n');
-		let startLine = 0;
-		if (lines.length > 0 && lines[0].trim() === '---') {
-			for (let i = 1; i < lines.length; i++) {
-				if (lines[i].trim() === '---') {
-					startLine = i + 1;
-					break;
-				}
-			}
-		}
-		let editor = this.getEditor();
-		if (editor) {
-			if (startLine >= editor.lineCount()) {
-				startLine = Math.max(0, editor.lineCount() - 1);
-			}
-			editor.setCursor({ line: startLine, ch: 0 });
-			editor.scrollIntoView({ from: { line: startLine, ch: 0 }, to: { line: startLine, ch: 0 } }, true);
-		}
-	}
-
-	private setCursorToEnd() {
-		let editor = this.getEditor();
-		if (editor) {
-			let lastLine = editor.lastLine();
-			let lastLineLength = editor.getLine(lastLine).length;
-			editor.setCursor({ line: lastLine, ch: lastLineLength });
-			editor.scrollIntoView({ from: { line: lastLine, ch: 0 }, to: { line: lastLine, ch: lastLineLength } }, true);
-		}
-	}
-
-	private async setCursorToBeforeFootnotes(file: TFile) {
-		let content = await this.app.vault.read(file);
-		let lines = content.split('\n');
-		let footnoteLine = -1;
-		for (let i = 0; i < lines.length; i++) {
-			if (/^\s*\[\^[^\]]+\]:\s/.test(lines[i])) {
-				footnoteLine = i;
-				break;
-			}
-		}
-		if (footnoteLine === -1) {
-			this.setCursorToEnd();
-			return;
-		}
-		let targetLine = footnoteLine - 1;
-		while (targetLine >= 0 && lines[targetLine].trim() === '') {
-			targetLine--;
-		}
-		if (targetLine < 0) {
-			targetLine = 0;
-		}
-		let editor = this.getEditor();
-		if (editor) {
-			if (targetLine >= editor.lineCount()) {
-				targetLine = Math.max(0, editor.lineCount() - 1);
-			}
-			let ch = editor.getLine(targetLine).length;
-			editor.setCursor({ line: targetLine, ch: ch });
-			editor.scrollIntoView({ from: { line: targetLine, ch: 0 }, to: { line: targetLine, ch: ch } }, true);
-		}
-	}
-
-	private getEditor(): Editor {
-		return this.app.workspace.getActiveViewOfType(MarkdownView)?.editor;
-	}
+	//----------------------------------------------------------------------------------------
 
 	async loadSettings() {
-		let settings: PluginSettings = Object.assign(
+		const settings: PluginSettings = Object.assign(
 			{},
 			DEFAULT_SETTINGS,
 			await this.loadData()
 		);
-		if (settings?.saveTimer < SAFE_DB_FLUSH_INTERVAL) {
+		if (settings.saveTimer < SAFE_DB_FLUSH_INTERVAL)
 			settings.saveTimer = SAFE_DB_FLUSH_INTERVAL;
-		}
-		if (!settings.dbFileName || settings.dbFileName === DEFAULT_DB_FILENAME_LEGACY) {
-			settings.dbFileName = this.manifest.dir + '/cursor-positions.json';
-		}
+
 		this.settings = settings;
+		this.database = new CursorPositionDatabase(
+			this.app,
+			this.manifest!.dir!,
+			this.settings
+		);
+		this.manager = new PositionManager(this.app, this.database, this.settings);
+
+		if (!(await this.database.ensureDbFolder())) {
+			await this.saveData(this.settings);
+		}
 	}
 
 	async saveSettings() {
+		this.manager.clearExclusionCache();
+		await this.database.ensureDbFolder();
 		await this.saveData(this.settings);
-	}
-
-	async delay(ms: number) {
-		return new Promise(resolve => setTimeout(resolve, ms));
-	}
-}
-
-
-
-class SettingTab extends PluginSettingTab {
-	plugin: RememberCursorPosition;
-
-	constructor(app: App, plugin: RememberCursorPosition) {
-		super(app, plugin);
-		this.plugin = plugin;
-	}
-
-	display(): void {
-		let { containerEl } = this;
-
-		containerEl.empty();
-
-		containerEl.createEl('h2', { text: 'Remember cursor position - Settings' });
-
-		new SettingGroup(containerEl)
-			.addSetting((setting) =>
-				setting
-					.setName('Default cursor position')
-					.setDesc(
-						'When no saved position exists for a file, jump to this position. "Default" means do nothing.'
-					)
-					.addDropdown((drop) =>
-						drop
-							.addOption('beginning', 'Beginning')
-							.addOption('end', 'End')
-							.addOption('beforeFootnotes', 'Before footnotes')
-							.addOption('default', 'Default (do nothing)')
-							.setValue(this.plugin.settings.defaultPosition)
-							.onChange(async (value) => {
-								this.plugin.settings.defaultPosition = value as DefaultPosition;
-								await this.plugin.saveSettings();
-							})
-					)
-			)
-			.addSetting((setting) =>
-				setting
-					.setName('Data file name')
-					.setDesc('Save positions to this file')
-					.addText((text) =>
-						text
-							.setPlaceholder('Example: cursor-positions.json')
-							.setValue(this.plugin.settings.dbFileName)
-							.onChange(async (value) => {
-								this.plugin.settings.dbFileName = value;
-								await this.plugin.saveSettings();
-							})
-					)
-			)
-			.addSetting((setting) =>
-				setting
-					.setName('Delay after opening a new note')
-					.setDesc(
-						"This plugin shouldn't scroll if you used a link to the note header like [link](note.md#header). If it did, then increase the delay until everything works. If you are not using links to page sections, set the delay to zero (slider to the left). Slider values: 0-300 ms (default value: 100 ms)."
-					)
-					.addSlider((text) =>
-						text
-							.setLimits(0, 300, 10)
-							.setDynamicTooltip()
-							.setValue(this.plugin.settings.delayAfterFileOpening)
-							.onChange(async (value) => {
-								this.plugin.settings.delayAfterFileOpening = value;
-								await this.plugin.saveSettings();
-							})
-					)
-			)
-			.addSetting((setting) =>
-				setting
-					.setName('Delay between saving the cursor position to file')
-					.setDesc(
-						"Useful for multi-device users. If you don't want to wait until closing Obsidian to the cursor position been saved."
-					)
-					.addSlider((text) =>
-						text
-							.setLimits(SAFE_DB_FLUSH_INTERVAL, SAFE_DB_FLUSH_INTERVAL * 10, 10)
-							.setDynamicTooltip()
-							.setValue(this.plugin.settings.saveTimer)
-							.onChange(async (value) => {
-								this.plugin.settings.saveTimer = value;
-								await this.plugin.saveSettings();
-								window.clearInterval(this.plugin.saveTimerIntervalId);
-								this.plugin.saveTimerIntervalId = this.plugin.registerInterval(
-									window.setInterval(() => this.plugin.writeDb(this.plugin.db), value)
-								);
-							})
-					)
-
-			);
-
-		const { pruneOrphans, maxAgeDays, maxCount } = this.plugin.settings;
-		const pruningEnabled = pruneOrphans || maxAgeDays > 0 || maxCount > 0;
-		const entryCount = Object.keys(this.plugin.db).length;
-
-		new SettingGroup(containerEl)
-			.setHeading('Pruning')
-			.addSetting((setting) =>
-				setting
-					.setName('Remove entries for deleted or missing files')
-					.setDesc(
-						'On startup, remove saved positions for files that no longer exist in the vault. ' +
-						'Disable this if you use junctions, removable drives, or other setups where files may be temporarily unavailable.'
-					)
-					.addToggle((toggle) =>
-						toggle
-							.setValue(this.plugin.settings.pruneOrphans)
-							.onChange(async (value) => {
-								this.plugin.settings.pruneOrphans = value;
-								await this.plugin.saveSettings();
-								this.display();
-							})
-					)
-			)
-			.addSetting((setting) =>
-				setting
-					.setName('Remove entries older than')
-					.setDesc('On startup, remove saved positions for files that have not been visited within the selected period.')
-					.addDropdown((drop) =>
-						drop
-							.addOption('30', '30 days')
-							.addOption('60', '60 days')
-							.addOption('90', '90 days')
-							.addOption('365', '1 year')
-							.addOption('0', 'Never')
-							.setValue(String(this.plugin.settings.maxAgeDays))
-							.onChange(async (value) => {
-								this.plugin.settings.maxAgeDays = Number(value);
-								await this.plugin.saveSettings();
-								this.display();
-							})
-					)
-			)
-			.addSetting((setting) =>
-				setting
-					.setName('Maximum number of entries to keep')
-					.setDesc('On startup, if the number of saved positions exceeds this limit, the oldest entries are removed. Most-recently visited files are kept. "None" means no maximum limit.')
-					.addDropdown((drop) =>
-						drop
-							.addOption('50', '50')
-							.addOption('100', '100')
-							.addOption('250', '250')
-							.addOption('500', '500')
-							.addOption('0', 'None')
-							.setValue(String(this.plugin.settings.maxCount))
-							.onChange(async (value) => {
-								this.plugin.settings.maxCount = Number(value);
-								await this.plugin.saveSettings();
-								this.display();
-							})
-					)
-			)
-			.addSetting((setting) =>
-				setting
-					.setName('Apply pruning rules')
-					.setDesc(`Currently tracking ${entryCount} ${entryCount === 1 ? 'entry' : 'entries'}. Pruning runs automatically on next reload; use this to apply immediately.`)
-					.addButton((btn) => {
-						btn.setButtonText('Prune now')
-							.setDisabled(!pruningEnabled);
-						if (pruningEnabled) btn.setCta();
-						btn.onClick(async () => {
-							this.plugin.pruneDb();
-							await this.plugin.writeDb(this.plugin.db);
-							this.display();
-						});
-					})
-			);
 	}
 }
