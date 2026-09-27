@@ -10,7 +10,11 @@ An [Obsidian](https://obsidian.md/) plugin that remembers the cursor position, s
 - **Edit & Preview modes** — works in both editing and reading views
 - **Persistent storage** — positions are saved to a JSON file (configurable path) and survive app restarts
 - **Smart restoration** — avoids unwanted scrolling when opening links that target a specific section (`#header` links)
+- **Search result handling** — optionally keep the match position when a note is opened from a search result instead of restoring the saved position
 - **Configurable defaults** — choose what happens when no saved position exists: go to beginning, end, before footnotes, or do nothing
+- **Workspace restore** — restores positions when a workspace is loaded via the Workspaces core plugin, with an option to disable it
+- **Exclusions** — exclude specific files and folders from tracking using paths or glob patterns
+- **Forget all positions** — clear every saved position from the database from the settings page
 - **Pruning** — optionally remove entries for deleted files, old entries by age, or cap the total number of stored positions
 
 ## How it works
@@ -37,9 +41,13 @@ Each time you move the cursor or scroll in a note, the plugin records that state
 | Setting | Description |
 |---------|-------------|
 | Default cursor position | What to do when no saved position exists for a file (Beginning / End / Before footnotes / Default — do nothing) |
+| Skip restoring position when opening from a search result | When enabled, opening a note from a search result jumps to the match instead of the saved position |
+| Restore position when loading a workspace | When enabled, notes opened by loading a workspace restore their saved position (or the default position when none is saved) |
 | Data file name | Path to the JSON file where positions are stored |
 | Delay after opening a new note | Prevents unwanted scrolling when opening links with section anchors |
 | Delay between saving | How often the position database is written to disk |
+| Exclude files and folders from tracking | Paths or glob patterns of files and folders whose position is never saved or restored. Add each pattern individually; a pattern ending with `/` matches a folder and everything inside it; `*`, `**`, and `?` are supported |
+| Forget all saved positions | Removes every saved position from the database |
 | Remove entries for deleted files | Prune positions for files that no longer exist in the vault |
 | Remove entries older than | Automatically discard positions not updated within the selected period |
 | Maximum number of entries to keep | Limit the database size by keeping only the most recently visited files |
