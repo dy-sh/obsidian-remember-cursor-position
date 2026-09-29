@@ -1,0 +1,85 @@
+/* Required-input validation error highlight. */
+.rcp-input-error {
+	border-color: var(--color-red) !important;
+	box-shadow: 0 0 0 1px var(--color-red) !important;
+}
+
+/* Validation tooltip shown under the input while the error is active. */
+.rcp-validation-tooltip {
+	position: absolute;
+	top: calc(100% + 4px);
+	left: 0;
+	z-index: var(--layer-tooltip);
+	max-width: 260px;
+	padding: 4px 8px;
+	border-radius: var(--radius-m);
+	background-color: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+	line-height: var(--line-height-tight);
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+	pointer-events: none;
+}
+
+/* Tag cloud listing excluded files and folders. */
+.rcp-exclusion-list {
+	padding-bottom: 12px;
+}
+
+.rcp-exclusion-tags {
+	display: flex;
+	flex-wrap: wrap;
+	align-content: flex-start;
+	gap: 8px;
+	margin: 8px 12px 0;
+	padding: 0;
+	min-height: 0;
+	border: none;
+	background: none;
+}
+
+.rcp-exclusion-empty {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.rcp-exclusion-tag {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	max-width: 100%;
+	padding: 4px 6px 4px 12px;
+	border-radius: 999px;
+	background-color: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	color: var(--text-normal);
+	font-size: var(--font-ui-smaller);
+}
+
+.rcp-exclusion-tag-text {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.rcp-exclusion-tag-remove {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	padding: 0;
+	border: none;
+	border-radius: 50%;
+	background: transparent;
+	color: var(--text-muted);
+	font-size: 14px;
+	line-height: 1;
+	cursor: pointer;
+}
+
+.rcp-exclusion-tag-remove:hover {
+	color: var(--color-red);
+	background-color: var(--background-modifier-hover);
+}
