@@ -837,8 +837,9 @@ class SettingTab extends PluginSettingTab {
 			);
 
 		let addText: TextComponent | null = null;
-		exclusionsGroup.addSetting((setting) =>
-			setting
+		exclusionsGroup.addSetting((setting) => {
+			setting.settingEl.addClass('rcp-add-exclusion');
+			return setting
 				.setName('Add exclusion')
 				.setDesc('Add a path or glob pattern for a file or folder to exclude.')
 				.addText((text) => {
@@ -859,7 +860,7 @@ class SettingTab extends PluginSettingTab {
 							this.addExclusion(addText);
 						})
 				)
-		);
+		});
 
 		const excludedFiles = this.plugin.settings.excludedFiles || [];
 		const tagsContainer = exclusionsGroup.listEl.createDiv({ cls: 'rcp-exclusion-tags' });
