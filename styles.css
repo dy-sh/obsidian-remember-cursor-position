@@ -27,6 +27,11 @@
 	padding-bottom: 12px;
 }
 
+/* The "Add exclusion" input row. */
+.setting-item.rcp-add-exclusion {
+	padding-bottom: 0 !important;
+}
+
 .rcp-exclusion-tags {
 	display: flex;
 	flex-wrap: wrap;
