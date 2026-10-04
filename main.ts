@@ -1,4 +1,4 @@
-import { App, Plugin, PluginSettingTab, SettingGroup, MarkdownView, TAbstractFile, Editor, TFile, Notice, TextComponent } from 'obsidian';
+import { App, Plugin, PluginSettingTab, SettingGroup, MarkdownView, TAbstractFile, Editor, TFile, Notice, TextComponent, AbstractInputSuggest, ButtonComponent, Modal, TFolder } from 'obsidian';
 
 type DefaultPosition = 'beginning' | 'end' | 'default' | 'beforeFootnotes';
 
@@ -631,67 +631,181 @@ export default class RememberCursorPosition extends Plugin {
 
 
 
+class PathSuggest extends AbstractInputSuggest<string> {
+	constructor(app: App, inputEl: HTMLInputElement) {
+		super(app, inputEl);
+		this.limit = 50;
+	}
+
+	getSuggestions(query: string): string[] {
+		const q = query.trim().toLowerCase();
+		if (!q) return [];
+		const out: string[] = [];
+		for (const file of this.app.vault.getAllLoadedFiles()) {
+			const path = file instanceof TFolder ? `${file.path}/` : file.path;
+			if (path.toLowerCase().includes(q)) out.push(path);
+		}
+		return out.slice(0, this.limit || 50);
+	}
+
+	renderSuggestion(value: string, el: HTMLElement): void {
+		el.setText(value);
+	}
+}
+
+class AddExclusionModal extends Modal {
+	private inputEl: HTMLInputElement | null = null;
+	private suggest: PathSuggest | null = null;
+	private errorTimer = 0;
+	private errorInput: HTMLInputElement | null = null;
+	private errorTooltip: HTMLElement | null = null;
+	private errorScrollContainer: HTMLElement | null = null;
+
+	constructor(
+		app: App,
+		private onAdd: (pattern: string) => void,
+	) {
+		super(app);
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		contentEl.createEl('h3', { text: 'Add exclusion' });
+		contentEl.createEl('p', {
+			cls: 'rcp-modal-desc',
+			text: 'Select a file or folder from the vault, or type a path or glob pattern. Patterns ending with "/" match a folder and everything inside it.',
+		});
+
+		const inputWrap = contentEl.createDiv({ cls: 'rcp-modal-input-wrap' });
+		const input = new TextComponent(inputWrap);
+		input.setPlaceholder('e.g. dashboards/ or **/templates/*.md');
+		input.inputEl.addClass('rcp-modal-input');
+		this.inputEl = input.inputEl;
+
+		this.suggest = new PathSuggest(this.app, input.inputEl);
+		this.suggest.onSelect((value) => {
+			input.setValue(value);
+			input.inputEl.focus();
+		});
+
+		input.inputEl.addEventListener('keydown', (e) => {
+			if (e.key === 'Enter') {
+				e.preventDefault();
+				this.submit();
+			}
+		});
+
+		const buttons = contentEl.createDiv({ cls: 'modal-button-container' });
+		new ButtonComponent(buttons)
+			.setButtonText('Cancel')
+			.onClick(() => this.close());
+		new ButtonComponent(buttons)
+			.setButtonText('Add')
+			.setCta()
+			.onClick(() => this.submit());
+	}
+
+	onClose(): void {
+		this.clearError();
+		this.suggest?.close();
+		this.contentEl.empty();
+	}
+
+	private submit(): void {
+		const input = this.inputEl;
+		if (!input) return;
+		const value = input.value.trim();
+		if (!value) {
+			this.showRequiredError(input, 'Path is required.');
+			return;
+		}
+		this.onAdd(value);
+		this.close();
+	}
+
+	private getScrollContainer(el: HTMLElement): HTMLElement | null {
+		let node: HTMLElement | null = el;
+		while (node) {
+			const overflowY = window.getComputedStyle(node).overflowY;
+			if (overflowY === 'auto' || overflowY === 'scroll') return node;
+			node = node.parentElement;
+		}
+		return null;
+	}
+
+	private onErrorScroll = (): void => {
+		const input = this.errorInput;
+		const container = this.errorScrollContainer;
+		if (!input || !container) return;
+		const rect = input.getBoundingClientRect();
+		const cRect = container.getBoundingClientRect();
+		const visible =
+			rect.bottom >= cRect.top &&
+			rect.top <= cRect.bottom &&
+			rect.right >= cRect.left &&
+			rect.left <= cRect.right;
+		if (!visible) this.clearError();
+	};
+
+	private showRequiredError(input: HTMLInputElement, message: string): void {
+		this.clearError();
+		const parent = input.parentElement;
+		if (!parent) return;
+		parent.addClass('rcp-validation-relative');
+		input.addClass('rcp-input-error');
+
+		const tooltip = parent.createDiv({ cls: 'rcp-validation-tooltip' });
+		tooltip.setText(message);
+
+		const container = this.getScrollContainer(input);
+		if (container) {
+			this.errorScrollContainer = container;
+			container.addEventListener('scroll', this.onErrorScroll);
+			const cRect = container.getBoundingClientRect();
+			const tRect = tooltip.getBoundingClientRect();
+			let left = input.offsetLeft;
+			let top = (parent.clientHeight ?? 0) + 4;
+			if (tRect.left < cRect.left) left += cRect.left - tRect.left;
+			if (tRect.right > cRect.right) left -= tRect.right - cRect.right;
+			if (tRect.bottom > cRect.bottom) top -= tRect.bottom - cRect.bottom;
+			tooltip.setCssProps({
+				'--rcp-vt-left': `${left}px`,
+				'--rcp-vt-top': `${top}px`,
+			});
+		}
+
+		this.errorInput = input;
+		this.errorTooltip = tooltip;
+
+		this.errorTimer = window.setTimeout(() => this.clearError(), 3000);
+
+		input.addEventListener('input', () => this.clearError(), { once: true });
+		input.addEventListener('blur', () => this.clearError(), { once: true });
+	}
+
+	private clearError(): void {
+		window.clearTimeout(this.errorTimer);
+		if (this.errorInput) {
+			this.errorInput.removeClass('rcp-input-error');
+			this.errorInput = null;
+		}
+		if (this.errorTooltip && this.errorTooltip.parentElement) {
+			this.errorTooltip.parentElement.removeChild(this.errorTooltip);
+		}
+		this.errorTooltip = null;
+		if (this.errorScrollContainer) {
+			this.errorScrollContainer.removeEventListener('scroll', this.onErrorScroll);
+			this.errorScrollContainer = null;
+		}
+	}
+}
+
 class SettingTab extends PluginSettingTab {
 	plugin: RememberCursorPosition;
-	requiredErrorTimer: number = 0;
-	requiredErrorInput: HTMLInputElement | null = null;
-	requiredErrorTooltip: HTMLElement | null = null;
-	requiredErrorParent: HTMLElement | null = null;
 
 	constructor(app: App, plugin: RememberCursorPosition) {
 		super(app, plugin);
 		this.plugin = plugin;
-	}
-
-	private showRequiredError(input: TextComponent, message: string) {
-		this.clearRequiredError();
-		const inputEl = input.inputEl;
-		inputEl.addClass('rcp-input-error');
-
-		const tooltip = document.createElement('div');
-		tooltip.addClass('rcp-validation-tooltip');
-		tooltip.setText(message);
-		const parent = inputEl.parentElement;
-		if (parent) {
-			parent.style.position = 'relative';
-			tooltip.style.left = inputEl.offsetLeft + 'px';
-			parent.appendChild(tooltip);
-		}
-
-		this.requiredErrorInput = inputEl;
-		this.requiredErrorTooltip = tooltip;
-		this.requiredErrorParent = parent;
-
-		this.requiredErrorTimer = window.setTimeout(() => this.clearRequiredError(), 3000);
-
-		inputEl.addEventListener('input', () => this.clearRequiredError(), { once: true });
-		inputEl.addEventListener('blur', () => this.clearRequiredError(), { once: true });
-	}
-
-	private clearRequiredError() {
-		window.clearTimeout(this.requiredErrorTimer);
-		if (this.requiredErrorInput) {
-			this.requiredErrorInput.removeClass('rcp-input-error');
-			this.requiredErrorInput = null;
-		}
-		if (this.requiredErrorTooltip && this.requiredErrorTooltip.parentElement) {
-			this.requiredErrorTooltip.parentElement.removeChild(this.requiredErrorTooltip);
-		}
-		this.requiredErrorTooltip = null;
-		if (this.requiredErrorParent) {
-			this.requiredErrorParent.style.position = '';
-			this.requiredErrorParent = null;
-		}
-	}
-
-	private addExclusion(addText: TextComponent | null) {
-		const value = addText ? addText.getValue().trim() : '';
-		if (!value) {
-			if (addText) this.showRequiredError(addText, 'Path is required.');
-			return;
-		}
-		this.plugin.settings.excludedFiles.push(value);
-		this.plugin.saveSettings().then(() => this.display());
 	}
 
 	private getScrollContainer(): HTMLElement | null {
@@ -715,7 +829,6 @@ class SettingTab extends PluginSettingTab {
 		const scrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
 
 		containerEl.empty();
-		this.clearRequiredError();
 
 		new SettingGroup(containerEl)
 			.addSetting((setting) =>
@@ -836,30 +949,22 @@ class SettingTab extends PluginSettingTab {
 					)
 			);
 
-		let addText: TextComponent | null = null;
 		exclusionsGroup.addSetting((setting) => {
 			setting.settingEl.addClass('rcp-add-exclusion');
 			return setting
 				.setName('Add exclusion')
-				.setDesc('Add a path or glob pattern for a file or folder to exclude.')
-				.addText((text) => {
-					addText = text;
-					text.setPlaceholder('e.g. dashboards/ or **/templates/*.md');
-					text.inputEl.addEventListener('keydown', (e) => {
-						if (e.key === 'Enter') {
-							e.preventDefault();
-							this.addExclusion(addText);
-						}
-					});
-				})
+				.setDesc('Select a file or folder from the vault, or type a path or glob pattern for a file or folder to exclude.')
 				.addButton((btn) =>
 					btn
 						.setButtonText('Add')
 						.setCta()
 						.onClick(() => {
-							this.addExclusion(addText);
+							new AddExclusionModal(this.app, (pattern) => {
+								this.plugin.settings.excludedFiles.push(pattern);
+								this.plugin.saveSettings().then(() => this.display());
+							}).open();
 						})
-				)
+				);
 		});
 
 		const excludedFiles = this.plugin.settings.excludedFiles || [];

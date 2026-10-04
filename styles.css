@@ -4,11 +4,15 @@
 	box-shadow: 0 0 0 1px var(--color-red) !important;
 }
 
+.rcp-validation-relative {
+	position: relative;
+}
+
 /* Validation tooltip shown under the input while the error is active. */
 .rcp-validation-tooltip {
 	position: absolute;
-	top: calc(100% + 4px);
-	left: 0;
+	top: var(--rcp-vt-top, calc(100% + 4px));
+	left: var(--rcp-vt-left, 0px);
 	z-index: var(--layer-tooltip);
 	max-width: 260px;
 	padding: 4px 8px;
@@ -20,6 +24,16 @@
 	line-height: var(--line-height-tight);
 	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 	pointer-events: none;
+}
+
+/* Add-exclusion modal. */
+.rcp-modal-desc {
+	margin-top: 0;
+	color: var(--text-muted);
+}
+
+.rcp-modal-input-wrap .rcp-modal-input {
+	width: 100%;
 }
 
 /* Tag cloud listing excluded files and folders. */
