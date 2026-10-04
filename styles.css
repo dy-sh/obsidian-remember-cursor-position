@@ -36,23 +36,36 @@
 	width: 100%;
 }
 
-/* Tag cloud listing excluded files and folders. */
-.rcp-exclusion-list {
+/* Settings: exclusion list as a removable tag cloud. */
+.setting-item.rcp-exclusion-setting {
+	flex-wrap: wrap;
+}
+
+.setting-item.rcp-exclusion-setting.rcp-exclusion-setting {
+	padding-bottom: 0;
+}
+
+.setting-item.rcp-exclusion-setting .setting-item-info {
+	flex: 1 1 0;
+	min-width: 0;
+}
+
+.setting-item.rcp-exclusion-setting .setting-item-control {
+	flex: 0 0 auto;
+}
+
+.rcp-exclusion-group {
 	padding-bottom: 12px;
 }
 
-/* The "Add exclusion" input row. */
-.setting-item.rcp-add-exclusion {
-	padding-bottom: 0 !important;
-}
-
 .rcp-exclusion-tags {
+	flex-basis: 100%;
 	display: flex;
 	flex-wrap: wrap;
 	align-content: flex-start;
 	gap: 8px;
-	margin: 8px 12px 0;
-	padding: 0;
+	margin-top: 8px;
+	padding: 0 0 12px;
 	min-height: 0;
 	border: none;
 	background: none;

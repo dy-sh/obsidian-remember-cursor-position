@@ -937,26 +937,20 @@ class SettingTab extends PluginSettingTab {
 			);
 
 		const exclusionsGroup = new SettingGroup(containerEl)
-			.setHeading('Exclusions');
-		exclusionsGroup.listEl.addClass('rcp-exclusion-list');
-		exclusionsGroup.addSetting((setting) =>
-				setting
-					.setName('Exclude files and folders from tracking')
-					.setDesc(
-						'Files and folders matching these paths or glob patterns are never saved or restored. ' +
-						'Patterns ending with "/" match a folder and everything inside it. ' +
-						'Examples: "dashboard.md", "dashboards/", "**/templates/*.md".'
-					)
-			);
-
+			.setHeading('Exclusions')
+			.addClass('rcp-exclusion-group');
 		exclusionsGroup.addSetting((setting) => {
-			setting.settingEl.addClass('rcp-add-exclusion');
-			return setting
-				.setName('Add exclusion')
-				.setDesc('Select a file or folder from the vault, or type a path or glob pattern for a file or folder to exclude.')
+			setting.settingEl.addClass('rcp-exclusion-setting');
+			setting
+				.setName('Excluded files and folders')
+				.setDesc(
+					'Files and folders matching these paths or glob patterns are never saved or restored. ' +
+					'Patterns ending with "/" match a folder and everything inside it. ' +
+					'Examples: "dashboard.md", "dashboards/", "**/templates/*.md".'
+				)
 				.addButton((btn) =>
 					btn
-						.setButtonText('Add')
+						.setButtonText('Add exclusion')
 						.setCta()
 						.onClick(() => {
 							new AddExclusionModal(this.app, (pattern) => {
@@ -965,27 +959,26 @@ class SettingTab extends PluginSettingTab {
 							}).open();
 						})
 				);
+			const excludedFiles = this.plugin.settings.excludedFiles || [];
+			const tagsContainer = setting.settingEl.createDiv({ cls: 'rcp-exclusion-tags' });
+			if (excludedFiles.length === 0) {
+				tagsContainer.createSpan({ cls: 'rcp-exclusion-empty', text: 'No excluded files or folders.' });
+			} else {
+				excludedFiles.forEach((pattern, index) => {
+					const tag = tagsContainer.createSpan({ cls: 'rcp-exclusion-tag' });
+					tag.createSpan({ cls: 'rcp-exclusion-tag-text', text: pattern });
+					const removeBtn = tag.createEl('button', {
+						cls: 'rcp-exclusion-tag-remove',
+						text: '×',
+						attr: { type: 'button', 'aria-label': 'Remove exclusion' },
+					});
+					removeBtn.addEventListener('click', () => {
+						this.plugin.settings.excludedFiles.splice(index, 1);
+						this.plugin.saveSettings().then(() => this.display());
+					});
+				});
+			}
 		});
-
-		const excludedFiles = this.plugin.settings.excludedFiles || [];
-		const tagsContainer = exclusionsGroup.listEl.createDiv({ cls: 'rcp-exclusion-tags' });
-		if (excludedFiles.length === 0) {
-			tagsContainer.createSpan({ cls: 'rcp-exclusion-empty', text: 'No excluded files or folders.' });
-		} else {
-			excludedFiles.forEach((pattern, index) => {
-				const tag = tagsContainer.createSpan({ cls: 'rcp-exclusion-tag' });
-				tag.createSpan({ cls: 'rcp-exclusion-tag-text', text: pattern });
-				const removeBtn = tag.createEl('button', {
-					cls: 'rcp-exclusion-tag-remove',
-					text: '×',
-					attr: { type: 'button', 'aria-label': 'Remove exclusion' },
-				});
-				removeBtn.addEventListener('click', () => {
-					this.plugin.settings.excludedFiles.splice(index, 1);
-					this.plugin.saveSettings().then(() => this.display());
-				});
-			});
-		}
 
 		const { pruneOrphans, maxAgeDays, maxCount } = this.plugin.settings;
 		const pruningEnabled = pruneOrphans || maxAgeDays > 0 || maxCount > 0;
