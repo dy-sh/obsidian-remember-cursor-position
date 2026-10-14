@@ -237,6 +237,16 @@ export default class RememberCursorPosition extends Plugin {
 		return false;
 	}
 
+	// Obsidian's hover preview (Page preview) and the Hover Editor plugin both
+	// render a markdown view inside a popover carrying the `hover-popover` class;
+	// Hover Editor additionally adds the `hover-editor` class. Such windows are
+	// transient, so they must never jump to, or record, a saved position.
+	private isHoverPopoverActive(): boolean {
+		const container = this.app.workspace.getActiveViewOfType(MarkdownView)?.containerEl;
+		if (!container) return false;
+		return container.closest('.hover-popover') !== null || container.closest('.hover-editor') !== null;
+	}
+
 	private getOpenMarkdownFiles(): Set<string> {
 		const files = new Set<string>();
 		this.app.workspace.iterateAllLeaves((leaf) => {
@@ -279,6 +289,10 @@ export default class RememberCursorPosition extends Plugin {
 
 
 	checkEphemeralStateChanged() {
+		// Never track positions while a hover preview window is focused.
+		if (this.isHoverPopoverActive())
+			return;
+
 		let fileName = this.app.workspace.getActiveFile()?.path;
 
 		//waiting for load new file
@@ -330,6 +344,10 @@ export default class RememberCursorPosition extends Plugin {
 
 
 	async saveEphemeralState(st: EphemeralState) {
+		// Guards against recording a position from a hover preview window.
+		if (this.isHoverPopoverActive())
+			return;
+
 		let fileName = this.app.workspace.getActiveFile()?.path;
 		if (fileName && fileName == this.lastLoadedFileName) { //do not save if file changed or was not loaded
 			if (this.isExcluded(fileName)) return;
@@ -343,6 +361,14 @@ export default class RememberCursorPosition extends Plugin {
 
 		if (fileName && this.loadingFile && this.lastLoadedFileName == fileName) //if already started loading
 			return;
+
+		// Hover preview windows (Obsidian's Page preview and the Hover Editor
+		// plugin) must never restore a position. Forgetting the note's saved
+		// position also stops these windows from causing erratic cursor jumps.
+		if (this.isHoverPopoverActive()) {
+			if (fileName) delete this.db[fileName];
+			return;
+		}
 
 		// When a workspace is loaded and the user disabled workspace restoration,
 		// skip restoring positions during the load window.
