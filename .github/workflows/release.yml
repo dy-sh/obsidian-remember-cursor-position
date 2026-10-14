@@ -50,6 +50,11 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Check for optional styles
+        id: styles
+        run: |
+          [ -f styles.css ] && echo "exists=true" >> "$GITHUB_OUTPUT" || echo "exists=false" >> "$GITHUB_OUTPUT"
+
       - name: Commit version bump and tag
         run: |
           git config user.name "github-actions[bot]"
@@ -69,3 +74,4 @@ jobs:
             main.js
             manifest.json
             versions.json
+            ${{ steps.styles.outputs.exists == 'true' && 'styles.css' || '' }}
