@@ -1,4 +1,4 @@
-import { App, Plugin, PluginSettingTab, SettingGroup, MarkdownView, TAbstractFile, Editor, TFile, Notice, TextComponent, AbstractInputSuggest, ButtonComponent, Modal, TFolder } from 'obsidian';
+import { App, Plugin, PluginSettingTab, SettingGroup, MarkdownView, TAbstractFile, Editor, TFile, Notice, TextComponent, AbstractInputSuggest, ButtonComponent, Modal, TFolder, WorkspaceLeaf } from 'obsidian';
 
 type DefaultPosition = 'beginning' | 'end' | 'default' | 'beforeFootnotes';
 
@@ -106,12 +106,18 @@ export default class RememberCursorPosition extends Plugin {
 	lastLoadedFileName: string;
 	lastRestoredLeafFile = '';
 	lastRestoredAt = 0;
+	// File each visible pane was last seen showing. Obsidian reports a focus
+	// change inside a pane that already shows a note as a `file-open` for that
+	// note, so this map tells a real open apart from a mere focus change.
+	shownFiles = new WeakMap<WorkspaceLeaf, TFile>();
 	loadingFile = false;
 	saveTimerIntervalId: number;
 	layoutChangeTimer: number;
 	lastKnownMarkdownFiles: Set<string> = new Set();
 	workspaceLoadUntil = 0;
 	pendingWorkspaceRestore = false;
+	startupPending = true;
+	layoutReadyTimer = 0;
 	excludedPatterns: RegExp[] = [];
 	excludedPatternsCache = '';
 
@@ -120,7 +126,6 @@ export default class RememberCursorPosition extends Plugin {
 
 		try {
 			this.db = await this.readDb();
-			this.pruneDb();
 			this.lastSavedDb = await this.readDb();
 		} catch (e) {
 			console.error(
@@ -134,6 +139,21 @@ export default class RememberCursorPosition extends Plugin {
 
 		this.registerEvent(
 			this.app.workspace.on('file-open', (file) => this.restoreEphemeralState(file))
+		);
+
+		// Obsidian fires `file-open` from `activeLeafEvents()` whenever the
+		// active file changes, which includes moving the focus to a pane that
+		// already shows the note. Record what every visible pane shows before a
+		// click or a focus change, so that `restoreEphemeralState()` can tell the
+		// two cases apart.
+		const rememberBeforeFocusChange = () => this.rememberShownFiles(null);
+		this.registerDomEvent(document, 'pointerdown', rememberBeforeFocusChange, { capture: true });
+		this.registerEvent(
+			this.app.workspace.on('window-open', (win) =>
+				this.registerDomEvent(win.doc, 'pointerdown', rememberBeforeFocusChange, { capture: true }))
+		);
+		this.registerEvent(
+			this.app.workspace.on('active-leaf-change', (leaf) => this.rememberShownFiles(leaf))
 		);
 
 		this.registerEvent(
@@ -164,26 +184,36 @@ export default class RememberCursorPosition extends Plugin {
 		);
 
 		this.app.workspace.onLayoutReady(() => {
-			window.setTimeout(() => {
+			this.layoutReadyTimer = window.setTimeout(async () => {
+				// Defer pruning until the vault/workspace is ready, so entries are
+				// not dropped because files have not been loaded yet.
+				this.pruneDb();
+				this.lastSavedDb = await this.readDb();
+
 				const activeFile = this.app.workspace.getActiveFile();
-				if (!activeFile) return;
 				const leaf = this.app.workspace.getMostRecentLeaf();
 				//@ts-ignore no-official-API
 				const leafId = leaf ? leaf.id : '';
 				//@ts-ignore no-official-API
 				const leafFile = leaf ? (leaf.getViewState().state as any)?.file : '';
 				const guardKey = leafId + ':' + leafFile;
-				if (this.lastRestoredLeafFile !== guardKey) {
-					this.restoreEphemeralState();
+				// Panes visible at startup count as already shown, except the
+				// active one, so the forced restore below still runs for it.
+				this.rememberShownFiles(this.app.workspace.getActiveViewOfType(MarkdownView)?.leaf ?? null);
+
+				// Startup is no longer pending: allow restoration and tracking.
+				this.startupPending = false;
+
+				if (activeFile && this.lastRestoredLeafFile !== guardKey) {
+					await this.restoreEphemeralState();
 				}
 			}, LAYOUT_READY_RESTORE_DELAY);
 		});
-
-		this.restoreEphemeralState();
 	}
 
 	onunload() {
 		window.clearTimeout(this.layoutChangeTimer);
+		window.clearTimeout(this.layoutReadyTimer);
 	}
 
 	renameFile(file: TAbstractFile, oldPath: string) {
@@ -247,6 +277,18 @@ export default class RememberCursorPosition extends Plugin {
 		return container.closest('.hover-popover') !== null || container.closest('.hover-editor') !== null;
 	}
 
+	// Records the file of every visible markdown pane, so that a pane which
+	// already shows a note can be told apart from a pane that is about to show
+	// it. Pass the leaf that is about to change when the caller cannot know yet
+	// which file it will display.
+	private rememberShownFiles(except: WorkspaceLeaf | null) {
+		this.app.workspace.iterateAllLeaves((leaf) => {
+			const view = leaf.view;
+			if (leaf !== except && view instanceof MarkdownView && view.file && view.containerEl.offsetParent !== null)
+				this.shownFiles.set(leaf, view.file);
+		});
+	}
+
 	private getOpenMarkdownFiles(): Set<string> {
 		const files = new Set<string>();
 		this.app.workspace.iterateAllLeaves((leaf) => {
@@ -289,6 +331,10 @@ export default class RememberCursorPosition extends Plugin {
 
 
 	checkEphemeralStateChanged() {
+		// Suppress position tracking until startup restoration has completed.
+		if (this.startupPending)
+			return;
+
 		// Never track positions while a hover preview window is focused.
 		if (this.isHoverPopoverActive())
 			return;
@@ -356,7 +402,19 @@ export default class RememberCursorPosition extends Plugin {
 	}
 
 
+	// A restore that is still waiting out its delay must not be applied once
+	// another note has become active: the saved position belongs to the first
+	// note, and applying it would move the cursor of the second one.
+	private isStillActive(fileName: string) {
+		return this.app.workspace.getActiveFile()?.path === fileName && this.lastLoadedFileName == fileName;
+	}
+
+
 	async restoreEphemeralState(file?: TFile) {
+		// Suppress early restoration until the workspace layout is ready.
+		if (this.startupPending)
+			return;
+
 		let fileName = this.app.workspace.getActiveFile()?.path;
 
 		if (fileName && this.loadingFile && this.lastLoadedFileName == fileName) //if already started loading
@@ -368,6 +426,22 @@ export default class RememberCursorPosition extends Plugin {
 		if (this.isHoverPopoverActive()) {
 			if (fileName) delete this.db[fileName];
 			return;
+		}
+
+		// Focusing a pane that already shows the note is reported as a `file-open`
+		// for the same file. Restoring there would overwrite the cursor and scroll
+		// position the user has just set, and a double click would turn the jump
+		// into a text selection. Start tracking the note instead and leave the
+		// saved position alone.
+		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (fileName && activeView?.file && activeView.file.path === fileName) {
+			const alreadyShown = this.shownFiles.get(activeView.leaf) === activeView.file;
+			this.shownFiles.set(activeView.leaf, activeView.file);
+			if (alreadyShown && this.lastLoadedFileName != fileName) {
+				this.lastLoadedFileName = fileName;
+				this.lastEphemeralState = {};
+				return;
+			}
 		}
 
 		// When a workspace is loaded and the user disabled workspace restoration,
@@ -414,6 +488,13 @@ export default class RememberCursorPosition extends Plugin {
 
 					if (!containsFlashingSpan && !openedFromSearch) {
 						await this.delay(10)
+						// The delay can outlive the note: if another file became
+						// active in the meantime, the saved position belongs to a
+						// note that is no longer shown.
+						if (!this.isStillActive(fileName)) {
+							this.loadingFile = false;
+							return;
+						}
 						this.setEphemeralState(st);
 					}
 				} else if (this.settings.defaultPosition !== 'default') {
@@ -423,6 +504,10 @@ export default class RememberCursorPosition extends Plugin {
 
 					if (!containsFlashingSpan && !openedFromSearch) {
 						await this.delay(10)
+						if (!this.isStillActive(fileName)) {
+							this.loadingFile = false;
+							return;
+						}
 						if (this.settings.defaultPosition === 'beginning') {
 							await this.setCursorToBeginning(file || this.app.workspace.getActiveFile());
 						} else if (this.settings.defaultPosition === 'end') {
