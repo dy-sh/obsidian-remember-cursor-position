@@ -44,6 +44,11 @@ const LAYOUT_READY_RESTORE_DELAY = 600;
 // when the "restore on workspace load" option is disabled.
 const WORKSPACE_LOAD_WINDOW_MS = 3000;
 
+// Throttle for the position check: at most one per 100 ms after a scroll or
+// selection event. It equals the period of the polling it replaces, so a quick
+// note switch loses no more than it did before.
+const STATE_CHECK_THROTTLE_MS = 100;
+
 // Debounce for workspace layout change handling.
 const LAYOUT_CHANGE_DEBOUNCE_MS = 250;
 
@@ -113,6 +118,8 @@ export default class RememberCursorPosition extends Plugin {
 	loadingFile = false;
 	saveTimerIntervalId: number;
 	layoutChangeTimer: number;
+	stateCheckTimer = 0;
+	unloaded = false;
 	lastKnownMarkdownFiles: Set<string> = new Set();
 	workspaceLoadUntil = 0;
 	pendingWorkspaceRestore = false;
@@ -146,7 +153,10 @@ export default class RememberCursorPosition extends Plugin {
 		// already shows the note. Record what every visible pane shows before a
 		// click or a focus change, so that `restoreEphemeralState()` can tell the
 		// two cases apart.
-		const rememberBeforeFocusChange = () => this.rememberShownFiles(null);
+		const rememberBeforeFocusChange = () => {
+			this.flushStateCheck();
+			this.rememberShownFiles(null);
+		};
 		this.registerDomEvent(document, 'pointerdown', rememberBeforeFocusChange, { capture: true });
 		this.registerEvent(
 			this.app.workspace.on('window-open', (win) =>
@@ -162,7 +172,7 @@ export default class RememberCursorPosition extends Plugin {
 
 
 		this.registerEvent(
-			this.app.workspace.on('quit', () => { this.writeDb(this.db) }),
+			this.app.workspace.on('quit', () => this.flushState()),
 		);
 
 
@@ -174,10 +184,21 @@ export default class RememberCursorPosition extends Plugin {
 			this.app.vault.on('delete', (file) => this.deleteFile(file)),
 		);
 
-		//todo: replace by scroll and mouse cursor move events
-		this.registerInterval(
-			window.setInterval(() => this.checkEphemeralStateChanged(), 100)
-		);
+		// Track the position on scroll and selection events instead of polling.
+		// `scroll` does not bubble, so it is caught in the capture phase. Windows
+		// opened later (popouts) get the same listeners.
+		const scheduleStateCheck = () => this.scheduleStateCheck();
+		const trackWindow = (doc: Document) => {
+			this.registerDomEvent(doc, 'scroll', scheduleStateCheck, { capture: true, passive: true });
+			this.registerDomEvent(doc, 'selectionchange', scheduleStateCheck);
+		};
+		trackWindow(document);
+		this.registerEvent(this.app.workspace.on('window-open', (win) => trackWindow(win.doc)));
+		// Mobile may suspend the app without firing `quit`.
+		this.registerDomEvent(document, 'visibilitychange', () => {
+			if (document.visibilityState === 'hidden') this.flushState();
+		});
+		this.registerDomEvent(window, 'pagehide', () => this.flushState());
 
 		this.saveTimerIntervalId = this.registerInterval(
 			window.setInterval(() => this.writeDb(this.db), this.settings.saveTimer)
@@ -203,6 +224,7 @@ export default class RememberCursorPosition extends Plugin {
 
 				// Startup is no longer pending: allow restoration and tracking.
 				this.startupPending = false;
+				this.scheduleStateCheck();
 
 				if (activeFile && this.lastRestoredLeafFile !== guardKey) {
 					await this.restoreEphemeralState();
@@ -212,8 +234,39 @@ export default class RememberCursorPosition extends Plugin {
 	}
 
 	onunload() {
+		this.unloaded = true;
 		window.clearTimeout(this.layoutChangeTimer);
 		window.clearTimeout(this.layoutReadyTimer);
+		window.clearTimeout(this.stateCheckTimer);
+	}
+
+	// Coalesces bursts of scroll and selection events into one check.
+	private scheduleStateCheck() {
+		if (this.unloaded || this.stateCheckTimer) return;
+		this.stateCheckTimer = window.setTimeout(() => {
+			this.stateCheckTimer = 0;
+			if (this.unloaded) return;
+			// A hover preview suppresses tracking only while it is focused.
+			if (this.isHoverPopoverActive()) {
+				this.scheduleStateCheck();
+				return;
+			}
+			this.checkEphemeralStateChanged();
+		}, STATE_CHECK_THROTTLE_MS);
+	}
+
+	// Records a pending change now, before the active note can change.
+	private flushStateCheck() {
+		// With a hover preview focused the check is suppressed, so keep it pending.
+		if (!this.stateCheckTimer || this.isHoverPopoverActive()) return;
+		window.clearTimeout(this.stateCheckTimer);
+		this.stateCheckTimer = 0;
+		this.checkEphemeralStateChanged();
+	}
+
+	private flushState() {
+		this.flushStateCheck();
+		this.writeDb(this.db);
 	}
 
 	renameFile(file: TAbstractFile, oldPath: string) {
@@ -410,7 +463,17 @@ export default class RememberCursorPosition extends Plugin {
 	}
 
 
+	// Checks that arrived while a note was loading were skipped, and polling
+	// retried them on the next tick, so record the settled state afterwards.
 	async restoreEphemeralState(file?: TFile) {
+		try {
+			await this.restoreEphemeralStateOnce(file);
+		} finally {
+			this.scheduleStateCheck();
+		}
+	}
+
+	private async restoreEphemeralStateOnce(file?: TFile) {
 		// Suppress early restoration until the workspace layout is ready.
 		if (this.startupPending)
 			return;
